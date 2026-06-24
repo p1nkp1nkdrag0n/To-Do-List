@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up Team Project Manager database
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/team-project-manager.env
+ExecStart=/opt/team-project-manager/deploy/backup-db.sh

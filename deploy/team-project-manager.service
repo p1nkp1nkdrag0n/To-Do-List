@@ -1,0 +1,21 @@
+[Unit]
+Description=Team Project Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teamplanner
+Group=teamplanner
+WorkingDirectory=/opt/team-project-manager
+EnvironmentFile=/etc/team-project-manager.env
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/team-project-manager
+
+[Install]
+WantedBy=multi-user.target
