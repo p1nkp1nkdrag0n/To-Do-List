@@ -1,16 +1,11 @@
 const baseUrl = process.env.APP_URL || "http://localhost:4000";
 const password = "demo123456";
-const bootstrapCode = process.env.BOOTSTRAP_CODE || "";
-const registrationCodes = (process.env.DEMO_REGISTRATION_CODES || "")
-  .split(",")
-  .map((item) => item.trim())
-  .filter(Boolean);
 
 const users = [
-  { username: "demo_admin", displayName: "项目管理员" },
-  { username: "demo_alice", displayName: "Alice 设计" },
-  { username: "demo_bob", displayName: "Bob 前端" },
-  { username: "demo_chen", displayName: "Chen 后端" }
+  { username: "demo_kai", email: "demo_kai@example.local", displayName: "Kai 产品" },
+  { username: "demo_alice", email: "demo_alice@example.local", displayName: "Alice 设计" },
+  { username: "demo_bob", email: "demo_bob@example.local", displayName: "Bob 前端" },
+  { username: "demo_chen", email: "demo_chen@example.local", displayName: "Chen 后端" }
 ];
 
 const statusLabel = {
@@ -61,19 +56,14 @@ async function call(path, { token, method = "GET", body } = {}) {
   return data;
 }
 
-async function registerOrLogin(user, registrationCode) {
+async function registerOrLogin(user) {
   try {
     return await call("/api/auth/register", {
       method: "POST",
-      body: { ...user, password, registrationCode }
+      body: { ...user, password, confirmPassword: password }
     });
   } catch (error) {
     if (!String(error.message).includes("already taken")) {
-      if (String(error.message).includes("Registration code") || String(error.message).includes("Invalid registration code")) {
-        throw new Error(
-          `${error.message}\nSet BOOTSTRAP_CODE for demo_admin and DEMO_REGISTRATION_CODES with one invite code per remaining demo account.`
-        );
-      }
       throw error;
     }
     return call("/api/auth/login", {
@@ -106,15 +96,14 @@ async function main() {
   });
 
   const accounts = {};
-  for (const [index, user] of users.entries()) {
-    const registrationCode = index === 0 ? bootstrapCode : registrationCodes[index - 1];
-    accounts[user.username] = await registerOrLogin(user, registrationCode);
+  for (const user of users) {
+    accounts[user.username] = await registerOrLogin(user);
   }
 
-  const admin = accounts.demo_admin;
+  const primary = accounts.demo_kai;
   const stamp = new Date().toLocaleString("zh-CN", { hour12: false }).replace(/[/: ]/g, "-");
   let state = await call("/api/projects", {
-    token: admin.token,
+    token: primary.token,
     method: "POST",
     body: {
       name: `演示项目 - 团队发布节奏 ${stamp}`,
@@ -125,9 +114,9 @@ async function main() {
 
   for (const user of users.slice(1)) {
     state = await call(`/api/projects/${projectId}/members`, {
-      token: admin.token,
+      token: primary.token,
       method: "POST",
-      body: { username: user.username, role: "member" }
+      body: { username: user.username }
     });
   }
 
@@ -143,12 +132,12 @@ async function main() {
     { title: "甘特图交互", description: "支持周/月/年、条形拖拽和里程碑。", status: "doing", parent: "前端实现" },
     { title: "个人日程视图", description: "支持一天小时视图和 5 分钟吸附。", status: "todo", parent: "前端实现" },
     { title: "后端联调", description: "账号、权限、审批和实时广播。", status: "doing" },
-    { title: "权限与审批", description: "成员提交请求，管理员审批。", status: "doing", parent: "后端联调" },
+    { title: "权限与审批", description: "成员提交请求，项目成员审批。", status: "doing", parent: "后端联调" },
     { title: "实时同步", description: "多浏览器订阅项目更新。", status: "todo", parent: "后端联调" },
     { title: "发布验收", description: "完成一次端到端走查。", status: "todo" }
   ]) {
     const parentId = task.parent ? created[task.parent].id : null;
-    const result = await addTask(admin.token, projectId, state, {
+    const result = await addTask(primary.token, projectId, state, {
       title: task.title,
       description: task.description,
       status: task.status,
@@ -166,12 +155,12 @@ async function main() {
     ["个人日程视图", "demo_bob", 5, 8, "todo"],
     ["权限与审批", "demo_chen", 1, 6, "doing"],
     ["实时同步", "demo_chen", 6, 10, "todo"],
-    ["发布验收", "demo_admin", 11, 13, "todo"]
+    ["发布验收", "demo_kai", 11, 13, "todo"]
   ];
 
   for (const [taskTitle, username, startOffset, endOffset, status] of assignments) {
     state = await call(`/api/projects/${projectId}/assignments`, {
-      token: admin.token,
+      token: primary.token,
       method: "POST",
       body: {
         taskId: created[taskTitle].id,
@@ -190,7 +179,7 @@ async function main() {
     { task: "发布验收", date: addDays(monday, 13), title: "验收日", color: "#e11d48" }
   ]) {
     state = await call(`/api/projects/${projectId}/milestones`, {
-      token: admin.token,
+      token: primary.token,
       method: "POST",
       body: {
         taskId: created[milestone.task].id,
@@ -202,14 +191,14 @@ async function main() {
   }
 
   const knowledgeCategory = await call(`/api/projects/${projectId}/knowledge/categories`, {
-    token: admin.token,
+    token: primary.token,
     method: "POST",
     body: { name: "项目资料" }
   });
   const knowledgeCategoryId = knowledgeCategory.categories[0].id;
 
   await call(`/api/projects/${projectId}/knowledge/documents`, {
-    token: admin.token,
+    token: primary.token,
     method: "POST",
     body: {
       categoryId: knowledgeCategoryId,
@@ -218,14 +207,12 @@ async function main() {
 
 - 周一确认范围和负责人
 - 周中完成原型与核心功能评审
-- 周五检查风险、审批和成员负载
-
-每日容量按 12 小时计算，过载需要提前调整。`
+- 周五检查里程碑、审批和团队排期`
     }
   });
 
   await call(`/api/projects/${projectId}/knowledge/documents`, {
-    token: admin.token,
+    token: primary.token,
     method: "POST",
     body: {
       categoryId: knowledgeCategoryId,
@@ -233,8 +220,8 @@ async function main() {
       content: `## 核心检查项
 
 - 团队甘特图周/月/年视图正常
-- 成员负载和风险统计正常
-- 成员提交审批后管理员可以处理
+- 任务分配、里程碑和审批流正常
+- 成员提交审批后项目成员可以处理
 - 知识库文档可以被项目成员查看`
     }
   });
@@ -270,7 +257,7 @@ async function main() {
         type: "personal_to_team_task",
         eventId: bobPersonalEvent.id,
         title: "组件走查补充任务",
-        description: "由个人日程提交到团队，等待管理员审批。",
+        description: "由个人日程提交到团队，等待项目成员审批。",
         startDate: addDays(monday, 3),
         endDate: addDays(monday, 3),
         status: "todo"
@@ -318,7 +305,7 @@ async function main() {
     console.log(`- ${user.username} / ${password} (${user.displayName})`);
   }
   console.log("Suggested visual checks:");
-  console.log("- Login as demo_admin, open Team Mode, switch week/month/year scales.");
+  console.log("- Login as demo_kai, open Team Mode, switch week/month/year scales.");
   console.log("- Check colored assignment bars, task tree nesting, milestone flags, busy slots, and pending approvals.");
   console.log("- Login as demo_bob in another browser/private window to see personal/team schedule sync.");
   console.log(`Statuses used: ${Object.values(statusLabel).join(" / ")}`);

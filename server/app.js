@@ -1,11 +1,9 @@
 import express from "express";
 import crypto from "node:crypto";
 import { createToken, hashPassword, verifyPassword, verifyToken } from "./security.js";
-import { markInviteUsed, markInviteUser, resolveRegistrationCode } from "./registration.js";
 
 const memberColors = ["#2f7de1", "#24a148", "#f97316", "#8b5cf6", "#e11d48", "#0f766e", "#ca8a04", "#64748b"];
 const statuses = new Set(["todo", "doing", "done"]);
-const dailyCapacityHours = 12;
 
 function now() {
   return new Date().toISOString();
@@ -19,31 +17,6 @@ function addDays(date, days) {
   const value = new Date(`${date}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
-}
-
-function compareDates(a, b) {
-  return a.localeCompare(b);
-}
-
-function parseDateTimeMs(value) {
-  const [datePart, timePart = "00:00"] = value.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute] = timePart.split(":").map(Number);
-  return Date.UTC(year, month - 1, day, hour || 0, minute || 0);
-}
-
-function dateStartMs(date) {
-  const [year, month, day] = date.split("-").map(Number);
-  return Date.UTC(year, month - 1, day);
-}
-
-function eventEndExclusiveDate(event) {
-  const endDate = event.endAt.slice(0, 10);
-  const endTime = event.endAt.slice(11, 16);
-  if (event.allDay && endTime === "00:00") {
-    return compareDates(endDate, event.startAt.slice(0, 10)) > 0 ? endDate : addDays(endDate, 1);
-  }
-  return addDays(endDate, 1);
 }
 
 function dateOnly(value) {
@@ -67,6 +40,14 @@ function text(value, fallback = "") {
   return String(value).trim();
 }
 
+function normalizeEmail(value) {
+  const email = text(value).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw httpError(400, "Email must be a valid email address.");
+  }
+  return email;
+}
+
 function markdownText(value, fallback = "") {
   if (value === undefined || value === null) {
     return fallback;
@@ -88,19 +69,6 @@ function httpError(statusCode, message) {
   return error;
 }
 
-function requireValidRegistration(registration) {
-  if (registration.ok) {
-    return registration;
-  }
-  if (registration.reason === "missing") {
-    throw httpError(400, "Registration code is required.");
-  }
-  if (registration.reason === "bootstrap_unconfigured") {
-    throw httpError(503, "Bootstrap registration code is not configured.");
-  }
-  throw httpError(403, "Invalid registration code.");
-}
-
 function asyncRoute(handler) {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
@@ -114,6 +82,7 @@ function publicUser(row) {
   return {
     id: row.id,
     username: row.username,
+    email: row.email || "",
     displayName: row.display_name
   };
 }
@@ -125,8 +94,8 @@ function getBearerToken(req) {
 
 function getMembership(db, projectId, userId) {
   return db.get(
-    `SELECT pm.project_id AS projectId, pm.user_id AS userId, pm.role, pm.color,
-            u.username, u.display_name AS displayName
+    `SELECT pm.project_id AS projectId, pm.user_id AS userId, 'admin' AS role, pm.color,
+            u.username, u.email, u.display_name AS displayName
        FROM project_members pm
        JOIN users u ON u.id = pm.user_id
       WHERE pm.project_id = ? AND pm.user_id = ?`,
@@ -143,15 +112,7 @@ function requireMember(db, projectId, userId) {
 }
 
 function requireAdmin(db, projectId, userId) {
-  const membership = requireMember(db, projectId, userId);
-  if (membership.role !== "admin") {
-    throw httpError(403, "Project admin permission is required.");
-  }
-  return membership;
-}
-
-function countAdmins(db, projectId) {
-  return db.get("SELECT COUNT(*) AS count FROM project_members WHERE project_id = ? AND role = 'admin'", [projectId]).count;
+  return requireMember(db, projectId, userId);
 }
 
 function projectTask(db, projectId, taskId) {
@@ -290,58 +251,6 @@ async function deleteAssignment(db, assignmentId) {
   await db.run("DELETE FROM assignments WHERE id = ?", [assignmentId]);
 }
 
-function personalBusyDailyTotals(db, projectId) {
-  const events = db.all(
-    `SELECT pe.user_id AS userId, pe.start_at AS startAt, pe.end_at AS endAt, pe.all_day AS allDay
-       FROM personal_events pe
-       JOIN project_members pm ON pm.user_id = pe.user_id
-      WHERE pm.project_id = ?
-        AND pe.is_team_event = 0
-      ORDER BY pe.start_at`,
-    [projectId]
-  ).map((event) => ({ ...event, allDay: Boolean(event.allDay) }));
-  const totals = new Map();
-
-  for (const event of events) {
-    if (event.allDay) {
-      let date = event.startAt.slice(0, 10);
-      const endExclusive = eventEndExclusiveDate(event);
-      while (compareDates(date, endExclusive) < 0) {
-        const key = `${event.userId}|${date}`;
-        totals.set(key, (totals.get(key) || 0) + dailyCapacityHours);
-        date = addDays(date, 1);
-      }
-      continue;
-    }
-
-    const startMs = parseDateTimeMs(event.startAt);
-    const endMs = parseDateTimeMs(event.endAt);
-    if (endMs <= startMs) {
-      continue;
-    }
-    let date = event.startAt.slice(0, 10);
-    const endDate = event.endAt.slice(0, 10);
-    while (compareDates(date, addDays(endDate, 1)) < 0) {
-      const dayStart = dateStartMs(date);
-      const dayEnd = dayStart + 24 * 60 * 60 * 1000;
-      const overlapMs = Math.min(endMs, dayEnd) - Math.max(startMs, dayStart);
-      if (overlapMs > 0) {
-        const hours = Math.round((overlapMs / 3600000) * 100) / 100;
-        const key = `${event.userId}|${date}`;
-        totals.set(key, (totals.get(key) || 0) + hours);
-      }
-      date = addDays(date, 1);
-    }
-  }
-
-  return [...totals.entries()]
-    .map(([key, hours]) => {
-      const [userId, date] = key.split("|");
-      return { userId, date, hours: Math.round(hours * 100) / 100 };
-    })
-    .sort((a, b) => a.date.localeCompare(b.date) || a.userId.localeCompare(b.userId));
-}
-
 function toProjectState(db, projectId, currentUserId) {
   const project = db.get(
     `SELECT id, name, timezone, owner_id AS ownerId, created_at AS createdAt, updated_at AS updatedAt
@@ -354,12 +263,12 @@ function toProjectState(db, projectId, currentUserId) {
   }
   const currentMember = requireMember(db, projectId, currentUserId);
   const members = db.all(
-    `SELECT pm.user_id AS userId, pm.role, pm.color, pm.joined_at AS joinedAt,
-            u.username, u.display_name AS displayName
+    `SELECT pm.user_id AS userId, 'admin' AS role, pm.color, pm.joined_at AS joinedAt,
+            u.username, u.email, u.display_name AS displayName
        FROM project_members pm
        JOIN users u ON u.id = pm.user_id
       WHERE pm.project_id = ?
-      ORDER BY pm.role, u.display_name`,
+      ORDER BY u.display_name`,
     [projectId]
   );
   const tasks = db.all(
@@ -404,8 +313,7 @@ function toProjectState(db, projectId, currentUserId) {
     [projectId]
   ).map((request) => ({ ...request, payload: JSON.parse(request.payload) }));
 
-  const busySlots = currentMember.role === "admin"
-    ? db.all(
+  const busySlots = db.all(
       `SELECT pe.user_id AS userId, pe.start_at AS startAt, pe.end_at AS endAt, pe.all_day AS allDay
          FROM personal_events pe
          JOIN project_members pm ON pm.user_id = pe.user_id
@@ -413,8 +321,7 @@ function toProjectState(db, projectId, currentUserId) {
           AND pe.is_team_event = 0
         ORDER BY pe.start_at`,
       [projectId]
-    ).map((slot) => ({ ...slot, allDay: Boolean(slot.allDay), title: "忙碌" }))
-    : [];
+    ).map((slot) => ({ ...slot, allDay: Boolean(slot.allDay), title: "忙碌" }));
 
   return {
     project,
@@ -424,8 +331,7 @@ function toProjectState(db, projectId, currentUserId) {
     assignments,
     milestones,
     requests,
-    busySlots,
-    busyDailyTotals: personalBusyDailyTotals(db, projectId)
+    busySlots
   };
 }
 
@@ -457,7 +363,9 @@ export function createApp(db, realtime = {}) {
 
   app.post("/api/auth/register", asyncRoute(async (req, res) => {
     const username = text(req.body.username).toLowerCase();
+    const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
+    const confirmPassword = String(req.body.confirmPassword || "");
     const displayName = text(req.body.displayName, username);
     if (!/^[a-z0-9_.-]{3,32}$/.test(username)) {
       throw httpError(400, "Username must be 3-32 characters and use letters, numbers, dots, dashes or underscores.");
@@ -465,34 +373,37 @@ export function createApp(db, realtime = {}) {
     if (password.length < 6) {
       throw httpError(400, "Password must be at least 6 characters.");
     }
+    if (password !== confirmPassword) {
+      throw httpError(400, "Passwords do not match.");
+    }
     await db.reloadIfChanged?.();
     if (db.get("SELECT id FROM users WHERE username = ?", [username])) {
       throw httpError(409, "Username is already taken.");
     }
-    requireValidRegistration(resolveRegistrationCode(db, req.body.registrationCode));
-    const user = { id: id(), username, display_name: displayName };
+    if (db.get("SELECT id FROM users WHERE lower(email) = ?", [email])) {
+      throw httpError(409, "Email is already taken.");
+    }
+    const user = { id: id(), username, email, display_name: displayName };
     const current = now();
     const passwordHash = await hashPassword(password);
     await db.reloadIfChanged?.();
     if (db.get("SELECT id FROM users WHERE username = ?", [username])) {
       throw httpError(409, "Username is already taken.");
     }
-    const registration = requireValidRegistration(resolveRegistrationCode(db, req.body.registrationCode));
-    if (registration.inviteId && !(await markInviteUsed(db, registration.inviteId))) {
-      throw httpError(403, "Invalid registration code.");
+    if (db.get("SELECT id FROM users WHERE lower(email) = ?", [email])) {
+      throw httpError(409, "Email is already taken.");
     }
     await db.run(
-      "INSERT INTO users (id, username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
-      [user.id, username, passwordHash, displayName, current]
+      "INSERT INTO users (id, username, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [user.id, username, email, passwordHash, displayName, current]
     );
-    await markInviteUser(db, registration.inviteId, user.id);
     res.status(201).json({ user: publicUser(user), token: createToken(user) });
   }));
 
   app.post("/api/auth/login", asyncRoute(async (req, res) => {
     const username = text(req.body.username).toLowerCase();
     const password = String(req.body.password || "");
-    const user = db.get("SELECT * FROM users WHERE username = ?", [username]);
+    const user = db.get("SELECT * FROM users WHERE username = ? OR lower(email) = ?", [username, username]);
     if (!user || !(await verifyPassword(password, user.password_hash))) {
       throw httpError(401, "Invalid username or password.");
     }
@@ -532,7 +443,7 @@ export function createApp(db, realtime = {}) {
   app.get("/api/projects", (req, res) => {
     const projects = db.all(
       `SELECT p.id, p.name, p.timezone, p.owner_id AS ownerId, p.created_at AS createdAt,
-              p.updated_at AS updatedAt, pm.role, pm.color
+              p.updated_at AS updatedAt, 'admin' AS role, pm.color
          FROM projects p
          JOIN project_members pm ON pm.project_id = p.id
         WHERE pm.user_id = ?
@@ -658,7 +569,6 @@ export function createApp(db, realtime = {}) {
   app.post("/api/projects/:projectId/members", asyncRoute(async (req, res) => {
     requireAdmin(db, req.params.projectId, req.user.id);
     const username = text(req.body.username).toLowerCase();
-    const role = req.body.role === "admin" ? "admin" : "member";
     const user = db.get("SELECT * FROM users WHERE username = ?", [username]);
     if (!user) {
       throw httpError(404, "User not found.");
@@ -668,28 +578,15 @@ export function createApp(db, realtime = {}) {
     }
     await db.run(
       "INSERT INTO project_members (project_id, user_id, role, color, joined_at) VALUES (?, ?, ?, ?, ?)",
-      [req.params.projectId, user.id, role, pickMemberColor(db, req.params.projectId), now()]
+      [req.params.projectId, user.id, "admin", pickMemberColor(db, req.params.projectId), now()]
     );
     broadcastProject(req.params.projectId, "member:added");
     res.status(201).json(toProjectState(db, req.params.projectId, req.user.id));
   }));
 
   app.patch("/api/projects/:projectId/members/:userId", asyncRoute(async (req, res) => {
-    requireAdmin(db, req.params.projectId, req.user.id);
-    const membership = getMembership(db, req.params.projectId, req.params.userId);
-    if (!membership) {
-      throw httpError(404, "Member not found.");
-    }
-    const nextRole = req.body.role === "admin" ? "admin" : "member";
-    if (membership.role === "admin" && nextRole === "member" && countAdmins(db, req.params.projectId) <= 1) {
-      throw httpError(400, "A project needs at least one admin.");
-    }
-    await db.run(
-      "UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?",
-      [nextRole, req.params.projectId, req.params.userId]
-    );
-    broadcastProject(req.params.projectId, "member:updated");
-    res.json(toProjectState(db, req.params.projectId, req.user.id));
+    requireMember(db, req.params.projectId, req.user.id);
+    throw httpError(410, "Project member roles are no longer configurable.");
   }));
 
   app.delete("/api/projects/:projectId/members/:userId", asyncRoute(async (req, res) => {
@@ -698,8 +595,9 @@ export function createApp(db, realtime = {}) {
     if (!membership) {
       throw httpError(404, "Member not found.");
     }
-    if (membership.role === "admin" && countAdmins(db, req.params.projectId) <= 1) {
-      throw httpError(400, "A project needs at least one admin.");
+    const memberCount = db.get("SELECT COUNT(*) AS count FROM project_members WHERE project_id = ?", [req.params.projectId]).count;
+    if (memberCount <= 1) {
+      throw httpError(400, "A project needs at least one member.");
     }
     await db.run("DELETE FROM project_members WHERE project_id = ? AND user_id = ?", [req.params.projectId, req.params.userId]);
     broadcastProject(req.params.projectId, "member:removed");
@@ -938,7 +836,7 @@ export function createApp(db, realtime = {}) {
       throw httpError(404, "Event not found.");
     }
     if (event.is_team_event) {
-      throw httpError(403, "Team events are controlled by project admins.");
+      throw httpError(403, "Team events are controlled from the project schedule.");
     }
     await db.run("DELETE FROM personal_events WHERE id = ?", [req.params.eventId]);
     broadcastUser(req.user.id, "personal:event:deleted");

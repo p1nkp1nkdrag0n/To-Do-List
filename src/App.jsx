@@ -6,8 +6,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   FileText,
   Folder,
   FolderPlus,
@@ -47,8 +45,6 @@ const scaleLabels = {
   month: "月",
   year: "年"
 };
-
-const dailyCapacityHours = 12;
 
 function emptyAssignmentForm(today) {
   return {
@@ -122,167 +118,6 @@ function eventEndDate(event) {
   return eventDate(event.endAt);
 }
 
-function withinPeriod(date, period) {
-  return date >= period.start && date < period.endExclusive;
-}
-
-function assignmentOverlapsPeriod(assignment, period) {
-  return assignment.startDate < period.endExclusive && addDays(assignment.endDate, 1) > period.start;
-}
-
-function eachDateInRange(startDate, endExclusive) {
-  const dates = [];
-  let date = startDate;
-  while (date < endExclusive) {
-    dates.push(date);
-    date = addDays(date, 1);
-  }
-  return dates;
-}
-
-function clampAssignmentToPeriod(assignment, period) {
-  const start = assignment.startDate > period.start ? assignment.startDate : period.start;
-  const endExclusive = addDays(assignment.endDate, 1) < period.endExclusive ? addDays(assignment.endDate, 1) : period.endExclusive;
-  return { start, endExclusive };
-}
-
-function getProjectPeriod(state) {
-  const dates = [];
-  for (const assignment of state.assignments) {
-    dates.push(assignment.startDate, assignment.endDate);
-  }
-  for (const milestone of state.milestones) {
-    dates.push(milestone.date);
-  }
-  if (dates.length === 0) {
-    const today = todayDate();
-    return { start: today, endExclusive: addDays(today, 1), label: "整个项目" };
-  }
-  dates.sort();
-  return { start: dates[0], endExclusive: addDays(dates[dates.length - 1], 1), label: "整个项目" };
-}
-
-function periodLabel(period) {
-  return `${period.start} - ${addDays(period.endExclusive, -1)}`;
-}
-
-function taskScopeIds(state, period, rangeMode) {
-  if (rangeMode === "project") {
-    return new Set(state.tasks.map((task) => task.id));
-  }
-  const tasksById = new Map(state.tasks.map((task) => [task.id, task]));
-  const ids = new Set();
-  const addTaskAndParents = (taskId) => {
-    let task = tasksById.get(taskId);
-    while (task) {
-      ids.add(task.id);
-      task = task.parentId ? tasksById.get(task.parentId) : null;
-    }
-  };
-  for (const assignment of state.assignments) {
-    if (assignmentOverlapsPeriod(assignment, period)) {
-      addTaskAndParents(assignment.taskId);
-    }
-  }
-  for (const milestone of state.milestones) {
-    if (withinPeriod(milestone.date, period)) {
-      addTaskAndParents(milestone.taskId);
-    }
-  }
-  return ids;
-}
-
-function computeDashboard(state, period, rangeMode) {
-  const dayCount = Math.max(1, daysBetween(period.start, period.endExclusive));
-  const tasksById = new Map(state.tasks.map((task) => [task.id, task]));
-  const membersById = new Map(state.members.map((member) => [member.userId, member]));
-  const scopedTaskIds = taskScopeIds(state, period, rangeMode);
-  const scopedTasks = state.tasks.filter((task) => scopedTaskIds.has(task.id));
-  const statusCounts = {
-    todo: scopedTasks.filter((task) => task.status === "todo").length,
-    doing: scopedTasks.filter((task) => task.status === "doing").length,
-    done: scopedTasks.filter((task) => task.status === "done").length
-  };
-
-  const loadByMember = new Map(state.members.map((member) => [member.userId, {
-    member,
-    teamHours: 0,
-    busyHours: 0,
-    daily: new Map()
-  }]));
-
-  for (const assignment of state.assignments) {
-    if (!assignmentOverlapsPeriod(assignment, period)) {
-      continue;
-    }
-    const load = loadByMember.get(assignment.userId);
-    if (!load) {
-      continue;
-    }
-    const range = clampAssignmentToPeriod(assignment, period);
-    for (const date of eachDateInRange(range.start, range.endExclusive)) {
-      load.teamHours += dailyCapacityHours;
-      load.daily.set(date, (load.daily.get(date) || 0) + dailyCapacityHours);
-    }
-  }
-
-  for (const total of state.busyDailyTotals || []) {
-    if (!withinPeriod(total.date, period)) {
-      continue;
-    }
-    const load = loadByMember.get(total.userId);
-    if (!load) {
-      continue;
-    }
-    load.busyHours += total.hours;
-    load.daily.set(total.date, (load.daily.get(total.date) || 0) + total.hours);
-  }
-
-  const memberLoads = [...loadByMember.values()].map((load) => {
-    const totalHours = load.teamHours + load.busyHours;
-    const overloadDays = [...load.daily.values()].filter((hours) => hours > dailyCapacityHours).length;
-    return {
-      ...load,
-      totalHours,
-      overloadDays,
-      averageDaily: totalHours / dayCount,
-      utilization: Math.min(100, (totalHours / (dayCount * dailyCapacityHours)) * 100)
-    };
-  }).sort((a, b) => b.totalHours - a.totalHours);
-
-  const today = todayDate();
-  const overdueAssignments = state.assignments
-    .filter((assignment) => assignment.status !== "done" && assignment.endDate < today)
-    .filter((assignment) => rangeMode === "project" || withinPeriod(assignment.endDate, period));
-  const overdueMilestones = state.milestones
-    .filter((milestone) => milestone.date < today && tasksById.get(milestone.taskId)?.status !== "done")
-    .filter((milestone) => rangeMode === "project" || withinPeriod(milestone.date, period));
-  const pendingRequests = state.requests.filter((request) => request.status === "pending");
-  const overloadedMembers = memberLoads.filter((load) => load.overloadDays > 0);
-  const rangeMilestones = state.milestones.filter((milestone) => withinPeriod(milestone.date, period)).slice(0, 8);
-  const endingAssignments = state.assignments
-    .filter((assignment) => withinPeriod(assignment.endDate, period))
-    .sort((a, b) => a.endDate.localeCompare(b.endDate))
-    .slice(0, 8);
-
-  return {
-    period,
-    dayCount,
-    tasks: scopedTasks,
-    statusCounts,
-    completionRate: scopedTasks.length ? Math.round((statusCounts.done / scopedTasks.length) * 100) : 0,
-    memberLoads,
-    overdueAssignments,
-    overdueMilestones,
-    pendingRequests,
-    overloadedMembers,
-    rangeMilestones,
-    endingAssignments,
-    tasksById,
-    membersById
-  };
-}
-
 export default function App() {
   const projectLoadRef = useRef(0);
   const knowledgeLoadRef = useRef(0);
@@ -293,8 +128,7 @@ export default function App() {
   const [projectState, setProjectState] = useState(null);
   const [knowledgeState, setKnowledgeState] = useState(null);
   const [personalEvents, setPersonalEvents] = useState([]);
-  const [mode, setMode] = useState("dashboard");
-  const [dashboardScale, setDashboardScale] = useState("week");
+  const [mode, setMode] = useState("team");
   const [teamScale, setTeamScale] = useState("week");
   const [personalScale, setPersonalScale] = useState("day");
   const [selectedDate, setSelectedDate] = useState(todayDate());
@@ -487,7 +321,7 @@ export default function App() {
                 }}
               >
                 <span>{project.name}</span>
-                <small>{project.role === "admin" ? "管理员" : "成员"}</small>
+                <small>项目成员</small>
               </button>
             ))}
           </div>
@@ -533,7 +367,7 @@ export default function App() {
                 </button>
               )}
             </div>
-            <span>{mode === "dashboard" ? "仪表盘" : mode === "team" ? "团队模式" : mode === "knowledge" ? "知识库" : "个人模式"}</span>
+            <span>{mode === "team" ? "团队模式" : mode === "knowledge" ? "知识库" : "个人模式"}</span>
           </div>
           <div className="topbar-controls">
             <input
@@ -546,7 +380,6 @@ export default function App() {
               value={mode}
               onChange={setMode}
               options={[
-                ["dashboard", "仪表盘"],
                 ["team", "团队模式"],
                 ["personal", "个人模式"]
               ]}
@@ -565,14 +398,6 @@ export default function App() {
           <EmptyProject onOpenCreate={() => setProjectModalOpen(true)} />
         ) : !activeProjectState ? (
           <ProjectLoading />
-        ) : mode === "dashboard" ? (
-          <DashboardMode
-            state={activeProjectState}
-            scale={dashboardScale}
-            setScale={setDashboardScale}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-          />
         ) : mode === "team" ? (
           <TeamMode
             state={activeProjectState}
@@ -631,7 +456,7 @@ export default function App() {
 
 function AuthView({ onAuth, notice, setNotice }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ username: "", password: "", displayName: "", registrationCode: "" });
+  const [form, setForm] = useState({ username: "", email: "", password: "", confirmPassword: "" });
   const [busy, setBusy] = useState(false);
 
   const submit = async (event) => {
@@ -663,25 +488,25 @@ function AuthView({ onAuth, notice, setNotice }) {
           ]}
         />
         <label>
-          用户名
+          {mode === "login" ? "用户名或邮箱" : "用户名"}
           <input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} autoComplete="username" />
         </label>
         {mode === "register" && (
           <label>
-            显示名
-            <input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} />
-          </label>
-        )}
-        {mode === "register" && (
-          <label>
-            注册码
-            <input value={form.registrationCode} onChange={(event) => setForm({ ...form, registrationCode: event.target.value })} autoComplete="one-time-code" />
+            邮箱
+            <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" />
           </label>
         )}
         <label>
           密码
           <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} autoComplete={mode === "login" ? "current-password" : "new-password"} />
         </label>
+        {mode === "register" && (
+          <label>
+            确认密码
+            <input type="password" value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} autoComplete="new-password" />
+          </label>
+        )}
         {notice && <div className="inline-error">{notice}</div>}
         <button className="primary-button" disabled={busy}>
           <Save size={17} />
@@ -697,7 +522,7 @@ function EmptyProject({ onOpenCreate }) {
     <main className="empty-state">
       <div>
         <h2>还没有项目</h2>
-        <p>创建第一个项目后，就可以开始查看仪表盘、甘特图和成员负载。</p>
+        <p>创建第一个项目后，就可以开始安排团队任务、成员排期和个人日程。</p>
         <button className="primary-button" onClick={onOpenCreate}><FolderPlus size={17} />新建项目</button>
       </div>
     </main>
@@ -780,195 +605,6 @@ function DateStepper({ scale, selectedDate, setSelectedDate }) {
       <button type="button" onClick={() => setSelectedDate(shiftSelectedDate(scale, selectedDate, 1))} title="下一段" aria-label="下一段">
         <ChevronRight size={17} />
       </button>
-    </div>
-  );
-}
-
-function DashboardMode({ state, scale, setScale, selectedDate, setSelectedDate }) {
-  const [rangeMode, setRangeMode] = useState("current");
-  const period = useMemo(() => rangeMode === "current" ? getPeriod(scale, selectedDate) : getProjectPeriod(state), [rangeMode, scale, selectedDate, state]);
-  const dashboard = useMemo(() => computeDashboard(state, period, rangeMode), [state, period, rangeMode]);
-  const totalRiskCount = dashboard.overdueAssignments.length + dashboard.overdueMilestones.length + dashboard.overloadedMembers.length + dashboard.pendingRequests.length;
-
-  return (
-    <main className="workspace dashboard-workspace">
-      <div className="workspace-toolbar">
-        <div className="toolbar-title">
-          <h2>{state.project.name}</h2>
-          <span>仪表盘 · {periodLabel(period)}</span>
-        </div>
-        <Segmented
-          value={rangeMode}
-          onChange={setRangeMode}
-          options={[
-            ["current", "当前周期"],
-            ["project", "整个项目"]
-          ]}
-        />
-        {rangeMode === "current" && (
-          <>
-            <Segmented
-              value={scale}
-              onChange={setScale}
-              options={[
-                ["week", "一周"],
-                ["month", "一月"],
-                ["year", "一年"]
-              ]}
-            />
-            <DateStepper scale={scale} selectedDate={selectedDate} setSelectedDate={setSelectedDate} />
-          </>
-        )}
-      </div>
-
-      <div className="dashboard-grid">
-        <section className="dashboard-panel span-2">
-          <div className="panel-heading">
-            <h3>项目进度</h3>
-            <small>{dashboard.tasks.length} 个范围内任务</small>
-          </div>
-          <div className="metric-grid">
-            <MetricCard label="完成率" value={`${dashboard.completionRate}%`} tone="green" />
-            <MetricCard label="待办" value={dashboard.statusCounts.todo} />
-            <MetricCard label="进行中" value={dashboard.statusCounts.doing} tone="amber" />
-            <MetricCard label="已完成" value={dashboard.statusCounts.done} tone="green" />
-          </div>
-          <div className="progress-strip" aria-label="任务完成率">
-            <span style={{ width: `${dashboard.completionRate}%` }} />
-          </div>
-          <div className="status-summary">
-            <span><i className="status-dot todo" />待办 {dashboard.statusCounts.todo}</span>
-            <span><i className="status-dot doing" />进行中 {dashboard.statusCounts.doing}</span>
-            <span><i className="status-dot done" />完成 {dashboard.statusCounts.done}</span>
-          </div>
-        </section>
-
-        <section className="dashboard-panel">
-          <div className="panel-heading">
-            <h3>风险</h3>
-            <small>{totalRiskCount} 项</small>
-          </div>
-          <div className="risk-stack">
-            <RiskRow label="逾期任务" value={dashboard.overdueAssignments.length} danger={dashboard.overdueAssignments.length > 0} />
-            <RiskRow label="逾期里程碑" value={dashboard.overdueMilestones.length} danger={dashboard.overdueMilestones.length > 0} />
-            <RiskRow label="过载成员" value={dashboard.overloadedMembers.length} danger={dashboard.overloadedMembers.length > 0} />
-            <RiskRow label="待审批" value={dashboard.pendingRequests.length} danger={dashboard.pendingRequests.length > 0} />
-          </div>
-        </section>
-
-        <section className="dashboard-panel span-3">
-          <div className="panel-heading">
-            <h3>成员负载</h3>
-            <small>每日容量 {dailyCapacityHours} 小时 · {dashboard.dayCount} 天</small>
-          </div>
-          <div className="load-list">
-            {dashboard.memberLoads.map((load) => (
-              <div className={`load-row ${load.overloadDays > 0 ? "overload" : ""}`} key={load.member.userId}>
-                <div className="load-person">
-                  <span className="swatch" style={{ background: load.member.color }} />
-                  <div>
-                    <strong>{load.member.displayName}</strong>
-                    <small>@{load.member.username}</small>
-                  </div>
-                </div>
-                <div className="load-meter">
-                  <span style={{ width: `${load.utilization}%`, background: load.overloadDays > 0 ? "#d92d20" : load.member.color }} />
-                </div>
-                <div className="load-numbers">
-                  <span>{Math.round(load.totalHours * 10) / 10}h</span>
-                  <small>团队 {Math.round(load.teamHours * 10) / 10}h · 忙闲 {Math.round(load.busyHours * 10) / 10}h</small>
-                  <small>日均 {Math.round(load.averageDaily * 10) / 10}h · 过载 {load.overloadDays} 天</small>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="dashboard-panel">
-          <div className="panel-heading">
-            <h3>近期里程碑</h3>
-            <small>{dashboard.rangeMilestones.length} 项</small>
-          </div>
-          <CompactList
-            empty="当前范围暂无里程碑"
-            items={dashboard.rangeMilestones.map((milestone) => ({
-              key: milestone.id,
-              color: milestone.color,
-              title: milestone.title,
-              meta: `${dashboard.tasksById.get(milestone.taskId)?.title || "任务"} · ${milestone.date}`
-            }))}
-          />
-        </section>
-
-        <section className="dashboard-panel">
-          <div className="panel-heading">
-            <h3>即将结束</h3>
-            <small>{dashboard.endingAssignments.length} 项</small>
-          </div>
-          <CompactList
-            empty="当前范围暂无结束任务"
-            items={dashboard.endingAssignments.map((assignment) => ({
-              key: assignment.id,
-              color: dashboard.membersById.get(assignment.userId)?.color || "#697386",
-              title: dashboard.tasksById.get(assignment.taskId)?.title || "任务",
-              meta: `${assignment.displayName} · ${assignment.endDate} · ${statusLabels[assignment.status]}`
-            }))}
-          />
-        </section>
-
-        <section className="dashboard-panel">
-          <div className="panel-heading">
-            <h3>待审批</h3>
-            <small>{dashboard.pendingRequests.length} 项</small>
-          </div>
-          <CompactList
-            empty="暂无待审批请求"
-            items={dashboard.pendingRequests.slice(0, 8).map((request) => ({
-              key: request.id,
-              color: "#8b5cf6",
-              title: request.requesterDisplayName,
-              meta: formatRequest(request)
-            }))}
-          />
-        </section>
-      </div>
-    </main>
-  );
-}
-
-function MetricCard({ label, value, tone = "blue" }) {
-  return (
-    <div className={`metric-card ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function RiskRow({ label, value, danger }) {
-  return (
-    <div className={danger ? "risk-row danger" : "risk-row"}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function CompactList({ items, empty }) {
-  if (items.length === 0) {
-    return <div className="empty-line">{empty}</div>;
-  }
-  return (
-    <div className="compact-list">
-      {items.map((item) => (
-        <div className="compact-item" key={item.key}>
-          <span className="swatch" style={{ background: item.color }} />
-          <div>
-            <strong>{item.title}</strong>
-            <small>{item.meta}</small>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -1058,7 +694,7 @@ function MarkdownPreview({ content }) {
 }
 
 function KnowledgeMode({ state, knowledge, mutateKnowledge, mutateProject, showError }) {
-  const isAdmin = state.currentMember.role === "admin";
+  const isAdmin = true;
   const categories = knowledge?.categories || [];
   const documents = knowledge?.documents || [];
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
@@ -1265,7 +901,7 @@ function KnowledgeMode({ state, knowledge, mutateKnowledge, mutateProject, showE
             <div className="knowledge-empty">
               <BookOpen size={30} />
               <h2>暂无知识库文档</h2>
-              <p>{isAdmin ? "创建第一篇文档后，团队成员就可以在这里查看项目资料。" : "你可以提交新增文档申请，等待管理员审批。"}</p>
+              <p>创建第一篇文档后，团队成员就可以在这里查看项目资料。</p>
             </div>
           )}
         </section>
@@ -1375,7 +1011,7 @@ function KnowledgeDocumentForm({ form, setForm, categories, onSubmit, submitLabe
 }
 
 function TeamMode({ state, scale, setScale, selectedDate, setSelectedDate, mutateProject, showError }) {
-  const isAdmin = state.currentMember.role === "admin";
+  const isAdmin = true;
   const [showPersonalBusy, setShowPersonalBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -1494,27 +1130,10 @@ function MembersPanel({ state, isAdmin, mutateProject, showError }) {
             <span className="swatch" style={{ background: member.color }} />
             <div>
               <strong>{member.displayName}</strong>
-              <small>@{member.username} · {member.role === "admin" ? "管理员" : "成员"}</small>
+              <small>@{member.username}</small>
             </div>
             {isAdmin && (
               <div className="row-actions">
-                {member.role === "member" && (
-                  <button
-                    title="设为管理员"
-                    onClick={async () => {
-                      try {
-                        await mutateProject(`/api/projects/${state.project.id}/members/${member.userId}`, {
-                          method: "PATCH",
-                          body: { role: "admin" }
-                        });
-                      } catch (error) {
-                        showError(error);
-                      }
-                    }}
-                  >
-                    设为管理员
-                  </button>
-                )}
                 <button
                   className="icon-button danger"
                   title="移除成员"

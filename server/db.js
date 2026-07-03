@@ -48,6 +48,7 @@ export class AppDatabase {
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
+        email TEXT,
         password_hash TEXT NOT NULL,
         display_name TEXT NOT NULL,
         created_at TEXT NOT NULL
@@ -184,16 +185,24 @@ export class AppDatabase {
         FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
       );
 
-      CREATE TABLE IF NOT EXISTS registration_invites (
-        id TEXT PRIMARY KEY,
-        code_hash TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL,
-        used_at TEXT,
-        used_by TEXT,
-        FOREIGN KEY (used_by) REFERENCES users(id) ON DELETE SET NULL
-      );
     `);
+    this.addColumnIfMissing("users", "email", "TEXT");
+    this.database.run("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (lower(email)) WHERE email IS NOT NULL AND email <> ''");
     await this.persist();
+  }
+
+  addColumnIfMissing(table, column, definition) {
+    const statement = this.database.prepare(`PRAGMA table_info(${table})`);
+    try {
+      while (statement.step()) {
+        if (statement.getAsObject().name === column) {
+          return;
+        }
+      }
+    } finally {
+      statement.free();
+    }
+    this.database.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   async persist() {

@@ -31,9 +31,7 @@ ensure_env() {
 
   log "未找到 .env.lan，正在自动生成局域网配置"
   local auth_secret
-  local bootstrap_code
   auth_secret="$(random_token)"
-  bootstrap_code="$(random_token)"
 
   cat > .env.lan <<EOF
 NODE_ENV=lan
@@ -42,11 +40,9 @@ PORT=4000
 DB_PATH=./data/app.sqlite
 APP_URL=http://localhost:4000
 AUTH_SECRET=$auth_secret
-BOOTSTRAP_CODE=$bootstrap_code
 EOF
 
-  printf "\n首次管理员注册注册码：%s\n" "$bootstrap_code"
-  printf "该注册码已保存到 .env.lan 的 BOOTSTRAP_CODE 中。\n"
+  printf "\n已生成 .env.lan。现在注册账号不需要邀请码或初始化注册码。\n"
 }
 
 ensure_dependencies() {

@@ -8,9 +8,6 @@ import { WebSocket } from "ws";
 import { createDatabase } from "./db.js";
 import { startServer } from "./startup.js";
 
-const testBootstrapCode = "startup-bootstrap-code";
-process.env.BOOTSTRAP_CODE = testBootstrapCode;
-
 async function tempWorkspace() {
   return fs.mkdtemp(path.join(os.tmpdir(), "team-planner-startup-"));
 }
@@ -89,7 +86,7 @@ async function api(baseUrl, pathName, { token, method = "GET", body } = {}) {
 async function register(baseUrl, username) {
   const result = await api(baseUrl, "/api/auth/register", {
     method: "POST",
-    body: { username, password: "secret123", displayName: username.toUpperCase(), registrationCode: testBootstrapCode }
+    body: { username, email: `${username}@example.test`, password: "secret123", confirmPassword: "secret123" }
   });
   assert.equal(result.response.status, 201);
   return result.data;
@@ -119,28 +116,6 @@ async function openSocket(url) {
     socket.once("error", reject);
   });
   return socket;
-}
-
-async function runInviteScript(dbPath, count = 1) {
-  const child = spawn(process.execPath, ["scripts/create-invites.js", "--count", String(count)], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      DB_PATH: dbPath
-    },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  let output = "";
-  let errors = "";
-  child.stdout.on("data", (chunk) => {
-    output += chunk.toString();
-  });
-  child.stderr.on("data", (chunk) => {
-    errors += chunk.toString();
-  });
-  const exitCode = await new Promise((resolve) => child.once("exit", resolve));
-  assert.equal(exitCode, 0, errors);
-  return output;
 }
 
 test("startup server listens, serves frontend fallback and protects api routes", async () => {
@@ -178,18 +153,16 @@ test("startup server listens, serves frontend fallback and protects api routes",
   }
 });
 
-test("production startup requires auth and bootstrap secrets", async () => {
+test("production startup requires auth secret", async () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalAuthSecret = process.env.AUTH_SECRET;
-  const originalBootstrapCode = process.env.BOOTSTRAP_CODE;
   process.env.NODE_ENV = "production";
   delete process.env.AUTH_SECRET;
-  delete process.env.BOOTSTRAP_CODE;
 
   try {
     await assert.rejects(
       () => startServer({ port: 0 }),
-      /Missing required production environment variables: AUTH_SECRET, BOOTSTRAP_CODE/
+      /Missing required production environment variables: AUTH_SECRET/
     );
   } finally {
     if (originalNodeEnv === undefined) {
@@ -201,11 +174,6 @@ test("production startup requires auth and bootstrap secrets", async () => {
       delete process.env.AUTH_SECRET;
     } else {
       process.env.AUTH_SECRET = originalAuthSecret;
-    }
-    if (originalBootstrapCode === undefined) {
-      delete process.env.BOOTSTRAP_CODE;
-    } else {
-      process.env.BOOTSTRAP_CODE = originalBootstrapCode;
     }
   }
 });
@@ -254,45 +222,6 @@ test("startup database path creates a persistent sqlite file", async () => {
     const user = reopened.get("SELECT username, display_name AS displayName FROM users WHERE id = ?", ["persisted-user"]);
     assert.deepEqual(user, { username: "persisted", displayName: "Persisted User" });
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
-});
-
-test("invite creation script writes registration invites to DB_PATH", async () => {
-  const root = await tempWorkspace();
-  const dbPath = path.join(root, "invites.sqlite");
-
-  try {
-    const output = await runInviteScript(dbPath, 2);
-    assert.match(output, /Created 2 registration invites/);
-
-    const db = await createDatabase(dbPath);
-    const inviteCount = db.get("SELECT COUNT(*) AS count FROM registration_invites").count;
-    assert.equal(inviteCount, 2);
-  } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
-});
-
-test("running server reloads invite codes created by the CLI", async () => {
-  const root = await tempWorkspace();
-  const dbPath = path.join(root, "live-invites.sqlite");
-  const db = await createDatabase(dbPath);
-  const distPath = await tempDist(root);
-  const started = await startServer({ port: 0, host: "127.0.0.1", db, distPath });
-  const baseUrl = `http://127.0.0.1:${started.port}`;
-
-  try {
-    await register(baseUrl, "liveadmin");
-    const output = await runInviteScript(dbPath, 1);
-    const inviteCode = output.trim().split(/\r?\n/).at(-1);
-    const invited = await api(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "liveinvited", password: "secret123", displayName: "LIVE", registrationCode: inviteCode }
-    });
-    assert.equal(invited.response.status, 201);
-  } finally {
-    await closeServer(started.server);
     await fs.rm(root, { recursive: true, force: true });
   }
 });

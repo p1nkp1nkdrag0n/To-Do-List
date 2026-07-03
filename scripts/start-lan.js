@@ -39,7 +39,3 @@ if (urls.length) {
 if (!process.env.AUTH_SECRET) {
   console.warn("AUTH_SECRET is not set. Set it in .env.lan so login tokens stay signed with a private secret.");
 }
-
-if (!process.env.BOOTSTRAP_CODE) {
-  console.warn("BOOTSTRAP_CODE is not set. An empty database cannot register the first admin until you set it.");
-}

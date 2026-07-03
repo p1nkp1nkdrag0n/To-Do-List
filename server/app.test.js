@@ -3,10 +3,6 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { createDatabase } from "./db.js";
 import { createApp } from "./app.js";
-import { createRegistrationInvite, userCount } from "./registration.js";
-
-const testBootstrapCode = "test-bootstrap-code";
-process.env.BOOTSTRAP_CODE = testBootstrapCode;
 
 async function setup() {
   const db = await createDatabase(null);
@@ -19,49 +15,44 @@ async function setup() {
 }
 
 async function register(app, username) {
-  const registrationCode = userCount(app.locals.db) === 0
-    ? testBootstrapCode
-    : (await createRegistrationInvite(app.locals.db)).code;
   const response = await request(app)
     .post("/api/auth/register")
-    .send({ username, password: "secret123", displayName: username.toUpperCase(), registrationCode })
+    .send({ username, email: `${username}@example.test`, password: "secret123", confirmPassword: "secret123" })
     .expect(201);
   return response.body;
 }
 
-test("registration requires bootstrap or one-time invite codes", async () => {
-  const { app, db } = await setup();
+test("registration uses username, email, password and confirmation without invite codes", async () => {
+  const { app } = await setup();
 
   await request(app)
     .post("/api/auth/register")
-    .send({ username: "nocode", password: "secret123", displayName: "No Code" })
+    .send({ username: "noemail", password: "secret123", confirmPassword: "secret123" })
     .expect(400);
 
   await request(app)
     .post("/api/auth/register")
-    .send({ username: "wrongcode", password: "secret123", displayName: "Wrong Code", registrationCode: "wrong" })
-    .expect(403);
+    .send({ username: "mismatch", email: "mismatch@example.test", password: "secret123", confirmPassword: "different" })
+    .expect(400);
+
+  const registered = await request(app)
+    .post("/api/auth/register")
+    .send({ username: "firstuser", email: "first@example.test", password: "secret123", confirmPassword: "secret123" })
+    .expect(201);
+
+  assert.equal(registered.body.user.username, "firstuser");
+  assert.equal(registered.body.user.email, "first@example.test");
 
   await request(app)
     .post("/api/auth/register")
-    .send({ username: "firstadmin", password: "secret123", displayName: "First Admin", registrationCode: testBootstrapCode })
-    .expect(201);
+    .send({ username: "seconduser", email: "first@example.test", password: "secret123", confirmPassword: "secret123" })
+    .expect(409);
 
-  const invite = await createRegistrationInvite(db);
-
-  const invited = await request(app)
-    .post("/api/auth/register")
-    .send({ username: "invited", password: "secret123", displayName: "Invited", registrationCode: invite.code })
-    .expect(201);
-
-  await request(app)
-    .post("/api/auth/register")
-    .send({ username: "reused", password: "secret123", displayName: "Reused", registrationCode: invite.code })
-    .expect(403);
-
-  const inviteRow = db.get("SELECT used_at AS usedAt, used_by AS usedBy FROM registration_invites WHERE id = ?", [invite.id]);
-  assert.ok(inviteRow.usedAt);
-  assert.equal(inviteRow.usedBy, invited.body.user.id);
+  const loginByEmail = await request(app)
+    .post("/api/auth/login")
+    .send({ username: "first@example.test", password: "secret123" })
+    .expect(200);
+  assert.equal(loginByEmail.body.user.id, registered.body.user.id);
 });
 
 test("auth, permissions, project CRUD and assignment sync", async () => {
@@ -79,21 +70,28 @@ test("auth, permissions, project CRUD and assignment sync", async () => {
   await request(app)
     .post(`/api/projects/${projectId}/members`)
     .set("Authorization", `Bearer ${admin.token}`)
-    .send({ username: "member", role: "member" })
+    .send({ username: "member" })
     .expect(201);
 
   await request(app)
+    .patch(`/api/projects/${projectId}/members/${member.user.id}`)
+    .set("Authorization", `Bearer ${member.token}`)
+    .send({ role: "member" })
+    .expect(410);
+
+  const memberTaskResponse = await request(app)
     .post(`/api/projects/${projectId}/tasks`)
     .set("Authorization", `Bearer ${member.token}`)
-    .send({ title: "Should fail" })
-    .expect(403);
+    .send({ title: "Member can manage", status: "todo" })
+    .expect(201);
+  assert.equal(memberTaskResponse.body.tasks.some((task) => task.title === "Member can manage"), true);
 
   const taskResponse = await request(app)
     .post(`/api/projects/${projectId}/tasks`)
     .set("Authorization", `Bearer ${admin.token}`)
     .send({ title: "Design", status: "todo" })
     .expect(201);
-  const taskId = taskResponse.body.tasks[0].id;
+  const taskId = taskResponse.body.tasks.find((task) => task.title === "Design").id;
 
   await request(app)
     .post(`/api/projects/${projectId}/milestones`)
@@ -190,7 +188,7 @@ test("personal event can request a new team task through approval", async () => 
   assert.equal(approved.body.assignments[0].userId, member.user.id);
 });
 
-test("project state exposes personal busy totals without details for members", async () => {
+test("project state exposes personal busy details to every project member", async () => {
   const { app } = await setup();
   const admin = await register(app, "loadadmin");
   const member = await register(app, "loadmember");
@@ -225,20 +223,9 @@ test("project state exposes personal busy totals without details for members", a
     .set("Authorization", `Bearer ${member.token}`)
     .expect(200);
 
-  assert.equal(memberView.body.busySlots.length, 0);
-  assert.equal(memberView.body.busyDailyTotals.some((item) => "startAt" in item || "title" in item), false);
-
-  const memberTotals = memberView.body.busyDailyTotals.filter((item) => item.userId === member.user.id);
-  assert.deepEqual(
-    memberTotals.map((item) => [item.date, item.hours]),
-    [["2026-06-17", 2], ["2026-06-18", 2.5]]
-  );
-
-  const adminTotals = memberView.body.busyDailyTotals.filter((item) => item.userId === admin.user.id);
-  assert.deepEqual(
-    adminTotals.map((item) => [item.date, item.hours]),
-    [["2026-06-18", 12], ["2026-06-19", 12]]
-  );
+  assert.equal(memberView.body.busySlots.length, 2);
+  assert.equal(memberView.body.busySlots.some((item) => item.title === "Cross day" || item.title === "Focus days"), false);
+  assert.equal("busyDailyTotals" in memberView.body, false);
 
   const adminView = await request(app)
     .get(`/api/projects/${projectId}`)
@@ -246,7 +233,8 @@ test("project state exposes personal busy totals without details for members", a
     .expect(200);
 
   assert.equal(adminView.body.busySlots.length, 2);
-  assert.equal(adminView.body.busyDailyTotals.length, memberView.body.busyDailyTotals.length);
+  assert.deepEqual(adminView.body.busySlots, memberView.body.busySlots);
+  assert.equal("busyDailyTotals" in adminView.body, false);
 });
 
 test("creating another project does not clear or leak existing project content", async () => {
@@ -359,11 +347,12 @@ test("knowledge base permissions and project isolation", async () => {
     .expect(201);
   const documentId = documentResponse.body.documents[0].id;
 
-  await request(app)
+  const memberDocumentResponse = await request(app)
     .post(`/api/projects/${firstProjectId}/knowledge/documents`)
     .set("Authorization", `Bearer ${member.token}`)
-    .send({ title: "Should fail", content: "member direct write" })
-    .expect(403);
+    .send({ title: "成员直写", content: "member direct write" })
+    .expect(201);
+  assert.equal(memberDocumentResponse.body.documents.some((item) => item.title === "成员直写"), true);
 
   await request(app)
     .get(`/api/projects/${firstProjectId}/knowledge`)
@@ -375,8 +364,8 @@ test("knowledge base permissions and project isolation", async () => {
     .set("Authorization", `Bearer ${member.token}`)
     .expect(200);
   assert.equal(memberView.body.categories.length, 1);
-  assert.equal(memberView.body.documents.length, 1);
-  assert.equal(memberView.body.documents[0].title, "接口说明");
+  assert.equal(memberView.body.documents.length, 2);
+  assert.equal(memberView.body.documents.some((item) => item.title === "接口说明"), true);
 
   const isolatedView = await request(app)
     .get(`/api/projects/${secondProjectId}/knowledge`)

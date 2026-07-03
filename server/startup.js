@@ -20,9 +20,6 @@ export function validateProductionConfig(env = process.env) {
   if (!env.AUTH_SECRET) {
     missing.push("AUTH_SECRET");
   }
-  if (!env.BOOTSTRAP_CODE) {
-    missing.push("BOOTSTRAP_CODE");
-  }
   if (missing.length) {
     throw new Error(`Missing required production environment variables: ${missing.join(", ")}.`);
   }
