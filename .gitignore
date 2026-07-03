@@ -2,6 +2,7 @@ node_modules/
 dist/
 data/
 .env
+.env.lan
 .DS_Store
 npm-debug.log*
 TanWei123.pem

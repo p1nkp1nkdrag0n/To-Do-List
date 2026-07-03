@@ -1,8 +1,8 @@
 # 多人团队项目管理应用 v1
 
-这是一个本机可运行的多人团队项目管理应用原型，包含仪表盘、团队模式、个人模式和项目知识库。仪表盘展示项目进度、风险和成员负载，团队模式以甘特图展示多人任务排期，个人模式展示个人日程，知识库保存项目资料，并支持个人日程和知识库修改提交到团队审批。
+这是一个面向局域网部署的多人团队项目管理应用原型，包含仪表盘、团队模式、个人模式和项目知识库。仪表盘展示项目进度、风险和成员负载，团队模式以甘特图展示多人任务排期，个人模式展示个人日程，知识库保存项目资料，并支持个人日程和知识库修改提交到团队审批。
 
-云服务器上线步骤见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+推荐部署方式是在办公室、实验室或家庭局域网内选一台电脑作为主机，构建前端后用 Node.js 启动服务，其他设备通过主机内网 IP 访问。
 
 ## 主要功能
 
@@ -70,6 +70,8 @@
 
 ```text
 .
+├── start-lan.sh              # 一键局域网启动脚本
+├── .env.lan.example          # 局域网部署环境变量模板
 ├── index.html                # Vite 前端入口
 ├── package.json              # 脚本和依赖
 ├── vite.config.js            # Vite 配置与 /api、/ws 代理
@@ -88,7 +90,8 @@
 │   ├── dateUtils.js          # 日期、时间轴、比例计算工具
 │   └── styles.css            # 页面样式
 ├── scripts/
-│   ├── create-invites.js     # 服务器端一次性邀请码生成脚本
+│   ├── start-lan.js          # 局域网运行入口，打印内网访问地址
+│   ├── create-invites.js     # 局域网主机一次性邀请码生成脚本
 │   └── seed-demo.js          # 演示数据生成脚本
 └── deploy/
     ├── Caddyfile.example
@@ -106,7 +109,7 @@
 用户通过 `/api/auth/register` 注册，通过 `/api/auth/login` 登录。注册接口需要 `registrationCode`：
 
 - 全新数据库的第一个账号必须使用环境变量 `BOOTSTRAP_CODE`。
-- 后续账号必须使用服务器命令生成的全站一次性邀请码。
+- 后续账号必须使用局域网主机命令生成的全站一次性邀请码。
 
 后端会将密码用 `bcryptjs` 哈希后保存，并返回一个本地 token。
 
@@ -337,11 +340,72 @@ demo_chen / demo123456
 
 推荐先用 `demo_admin` 登录查看团队模式，再用另一个浏览器或隐私窗口登录 `demo_bob` 检查多人同步和个人模式。
 
-## 构建和生产启动
+## 局域网部署
 
 运行要求：Node.js `>=22.12`，推荐 Node.js 24 LTS。
 
-### 1. 构建前端
+### 推荐：一键启动
+
+在局域网主机上直接运行：
+
+```bash
+bash start-lan.sh
+```
+
+脚本会自动完成：
+
+- 检查 Node.js 和 npm。
+- 第一次运行时生成 `.env.lan`、随机 `AUTH_SECRET` 和首个管理员注册用的 `BOOTSTRAP_CODE`。
+- 在缺少依赖或依赖变化时执行 `npm ci`。
+- 在缺少构建产物或前端源码变化时执行 `npm run build`。
+- 启动局域网服务，并打印其他设备可访问的内网地址。
+
+首次运行时，终端会显示“首次管理员注册注册码”。打开应用后，用这个注册码注册第一个管理员账号。
+
+### 手动部署
+
+如果你希望自己控制每一步，可以按下面流程手动执行。
+
+#### 1. 准备配置
+
+在作为局域网主机的电脑上复制配置模板：
+
+```bash
+cp .env.lan.example .env.lan
+```
+
+编辑 `.env.lan`，至少修改这两项：
+
+```bash
+AUTH_SECRET=一段随机长密钥
+BOOTSTRAP_CODE=第一个管理员注册用的一次性注册码
+```
+
+可以用下面的命令生成随机密钥：
+
+```bash
+openssl rand -base64 32
+```
+
+默认局域网配置如下：
+
+```bash
+NODE_ENV=lan
+HOST=0.0.0.0
+PORT=4000
+DB_PATH=./data/app.sqlite
+APP_URL=http://localhost:4000
+```
+
+说明：
+
+- `HOST=0.0.0.0`：允许同一局域网内其他设备访问；如果改成 `127.0.0.1`，只能本机访问。
+- `PORT=4000`：局域网访问端口，其他设备访问 `http://主机内网IP:4000/`。
+- `DB_PATH=./data/app.sqlite`：数据库文件保存在项目目录下的 `data/`。
+- `AUTH_SECRET`：token 签名密钥，保持不变可以让登录状态稳定；修改后旧 token 会失效。
+- `BOOTSTRAP_CODE`：全新数据库第一个管理员账号注册时使用。
+
+#### 2. 安装依赖并构建前端
 
 ```bash
 npm ci
@@ -354,83 +418,58 @@ npm run build
 dist/
 ```
 
-### 2. 启动生产服务
+#### 3. 启动局域网服务
 
 ```bash
-NODE_ENV=production \
-HOST=127.0.0.1 \
-PORT=4000 \
-DB_PATH=/var/lib/team-project-manager/app.sqlite \
-AUTH_SECRET=<随机强密钥> \
-BOOTSTRAP_CODE=<首个管理员注册码> \
-npm start
+npm run lan:start
 ```
 
-生产启动后，后端会：
-
-- 提供 `/api` 接口。
-- 提供 `/ws` WebSocket 服务。
-- 静态托管 `dist/` 中的前端文件。
-- 提供公开健康检查 `/healthz`。
-
-生产环境缺少 `AUTH_SECRET` 或 `BOOTSTRAP_CODE` 时会拒绝启动。默认建议只监听本机：
+启动后会在终端打印本机和局域网访问地址，例如：
 
 ```text
-http://127.0.0.1:4000/
+LAN server running at http://localhost:4000/
+Open from other devices on the same LAN:
+- http://192.168.1.23:4000/
 ```
 
-### 3. 环境变量
+同一 Wi-Fi 或有线局域网内的其他电脑、平板、手机，打开终端打印的内网地址即可使用。首次使用时，用 `.env.lan` 里的 `BOOTSTRAP_CODE` 注册第一个管理员账号。
 
-常用环境变量：
+如果其他设备打不开：
 
-```bash
-NODE_ENV=production
-HOST=127.0.0.1
-PORT=4000
-DB_PATH=/var/lib/team-project-manager/app.sqlite
-AUTH_SECRET=replace-with-a-random-secret
-BOOTSTRAP_CODE=replace-with-first-admin-registration-code
-APP_URL=http://localhost:4000
-```
+- 确认所有设备在同一个局域网内。
+- 确认主机防火墙允许 TCP `4000` 端口入站。
+- 确认路由器没有开启 AP 隔离、访客网络隔离或客户端隔离。
+- 如果主机 IP 变化，重新查看 `npm run lan:start` 打印的新地址。
 
-说明：
+#### 4. 数据持久化和备份
 
-- `NODE_ENV`：设为 `production` 时启用生产启动检查。
-- `HOST`：监听地址；生产建议 `127.0.0.1`，由反向代理对公网提供 HTTPS。
-- `PORT`：后端服务端口。
-- `DB_PATH`：数据库文件路径；生产默认建议 `/var/lib/team-project-manager/app.sqlite`。
-- `AUTH_SECRET`：token 签名密钥，生产环境必须设置为随机强密钥。
-- `BOOTSTRAP_CODE`：全新数据库第一个账号使用的一次性初始化注册码。
-- `APP_URL`：演示数据脚本访问的后端地址。
-
-### 4. 数据持久化
-
-开发默认数据库文件：
+局域网默认数据库文件：
 
 ```text
 data/app.sqlite
 ```
 
-生产数据库建议放在：
+数据库写入会先写同目录临时文件再原子替换目标文件。部署主机需要保证 `data/` 目录可写，并定期备份 `data/app.sqlite`。
 
-```text
-/var/lib/team-project-manager/app.sqlite
-```
-
-数据库写入会先写同目录临时文件再原子替换目标文件。部署时需要保证数据库目录可写，并把该目录纳入备份策略。
-
-### 5. 生成邀请码
-
-全新生产库先用 `BOOTSTRAP_CODE` 注册第一个管理员。之后在服务器上生成一次性邀请码：
+可以直接复制数据库文件作为备份，也可以复用仓库里的备份脚本：
 
 ```bash
-cd /opt/team-project-manager
-sudo -u teamplanner env DB_PATH=/var/lib/team-project-manager/app.sqlite npm run invite:create -- --count 3
+DB_PATH=./data/app.sqlite BACKUP_DIR=./backups ./deploy/backup-db.sh
+```
+
+#### 5. 生成邀请码
+
+全新数据库先用 `BOOTSTRAP_CODE` 注册第一个管理员。之后在局域网主机上生成一次性邀请码：
+
+```bash
+npm run invite:create -- --count 3
 ```
 
 命令只会打印一次明文邀请码，数据库中只保存哈希。每个邀请码永久有效，但只能成功注册一次。
 
-## 部署建议
+## 公网服务器部署参考（可选）
+
+局域网部署不需要 Caddy、域名、HTTPS 证书或 systemd 服务；直接使用上面的 `npm run lan:start` 即可。下面内容只作为以后需要部署到公网 VPS 时的参考。
 
 ### Ubuntu VPS + systemd + Caddy
 
@@ -528,11 +567,10 @@ sudo systemctl start team-project-manager
 - 登录已有账号。
 - 使用注册码注册新账号。
 
-全新生产库的第一个账号使用 `/etc/team-project-manager.env` 中的 `BOOTSTRAP_CODE` 注册。第一个账号登录后可以创建第一个项目。后续成员注册前，服务器管理员先执行：
+全新局域网数据库的第一个账号使用 `.env.lan` 中的 `BOOTSTRAP_CODE` 注册。第一个账号登录后可以创建第一个项目。后续成员注册前，在局域网主机上执行：
 
 ```bash
-cd /opt/team-project-manager
-sudo -u teamplanner env DB_PATH=/var/lib/team-project-manager/app.sqlite npm run invite:create -- --count 1
+npm run invite:create -- --count 1
 ```
 
 然后把输出的邀请码发给对应成员。每个邀请码只能成功使用一次。
@@ -717,7 +755,7 @@ npm run test:startup
 - 生产环境缺少 `AUTH_SECRET` 或 `BOOTSTRAP_CODE` 时拒绝启动。
 - 邀请码脚本可以写入 `DB_PATH` 指向的数据库。
 
-运行生产构建检查：
+运行前端构建检查：
 
 ```bash
 npm run build
