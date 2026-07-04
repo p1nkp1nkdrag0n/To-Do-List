@@ -10,10 +10,12 @@ import {
   Folder,
   FolderPlus,
   LogOut,
+  Moon,
   Pencil,
   Plus,
   Settings,
   Save,
+  Sun,
   Trash2,
   Users,
   X
@@ -45,6 +47,32 @@ const scaleLabels = {
   month: "月",
   year: "年"
 };
+
+const themeStorageKey = "team-project-theme:v1";
+
+function readStoredTheme() {
+  try {
+    return localStorage.getItem(themeStorageKey) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function saveStoredTheme(theme) {
+  try {
+    localStorage.setItem(themeStorageKey, theme);
+  } catch {
+    // Ignore storage failures in private browsing or restricted environments.
+  }
+}
+
+function applyTheme(theme) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+}
 
 function emptyAssignmentForm(today) {
   return {
@@ -132,9 +160,19 @@ export default function App() {
   const [teamScale, setTeamScale] = useState("week");
   const [personalScale, setPersonalScale] = useState("day");
   const [selectedDate, setSelectedDate] = useState(todayDate());
+  const [theme, setTheme] = useState(readStoredTheme);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
+
+  useEffect(() => {
+    applyTheme(theme);
+    saveStoredTheme(theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((current) => current === "dark" ? "light" : "dark");
+  }, []);
 
   const showError = useCallback((error) => {
     setNotice(normalizeError(error));
@@ -277,11 +315,24 @@ export default function App() {
   };
 
   if (loading) {
-    return <div className="boot">加载中</div>;
+    return (
+      <div className="boot">
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        <span>加载中</span>
+      </div>
+    );
   }
 
   if (!token || !user) {
-    return <AuthView onAuth={authenticated} notice={notice} setNotice={setNotice} />;
+    return (
+      <AuthView
+        onAuth={authenticated}
+        notice={notice}
+        setNotice={setNotice}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+    );
   }
 
   const activeProjectState = matchingProjectState(projectState, projectId);
@@ -370,6 +421,7 @@ export default function App() {
             <span>{mode === "team" ? "团队模式" : mode === "knowledge" ? "知识库" : "个人模式"}</span>
           </div>
           <div className="topbar-controls">
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <input
               type="date"
               value={selectedDate}
@@ -454,7 +506,7 @@ export default function App() {
   );
 }
 
-function AuthView({ onAuth, notice, setNotice }) {
+function AuthView({ onAuth, notice, setNotice, theme, onToggleTheme }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ username: "", email: "", password: "", confirmPassword: "" });
   const [busy, setBusy] = useState(false);
@@ -478,7 +530,10 @@ function AuthView({ onAuth, notice, setNotice }) {
   return (
     <main className="auth-screen">
       <form className="auth-panel" onSubmit={submit}>
-        <h1>项目日程</h1>
+        <div className="auth-title-row">
+          <h1>项目日程</h1>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
         <Segmented
           value={mode}
           onChange={setMode}
@@ -514,6 +569,22 @@ function AuthView({ onAuth, notice, setNotice }) {
         </button>
       </form>
     </main>
+  );
+}
+
+function ThemeToggle({ theme, onToggle }) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      className="theme-toggle"
+      type="button"
+      onClick={onToggle}
+      title={`切换到${isDark ? "浅色" : "深色"}模式`}
+      aria-label={`切换到${isDark ? "浅色" : "深色"}模式`}
+    >
+      {isDark ? <Moon size={16} /> : <Sun size={16} />}
+      <span>{isDark ? "深色模式" : "浅色模式"}</span>
+    </button>
   );
 }
 

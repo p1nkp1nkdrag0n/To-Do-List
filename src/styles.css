@@ -1,20 +1,106 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-family: Inter, "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif;
+  color: #172033;
+  background: #eef2f7;
+  --app-bg: #eef2f7;
+  --auth-bg: radial-gradient(circle at top left, #dbeafe, #f8fafc 46%);
+  --border: #d7dee9;
+  --muted: #667085;
+  --panel: #ffffff;
+  --panel-soft: #f7f9fc;
+  --panel-raised: #eef3f8;
+  --ink: #172033;
+  --body-text: #344054;
+  --button-bg: #ffffff;
+  --button-hover-bg: #eef3f8;
+  --button-hover-border: #b8c4d6;
+  --field-bg: #ffffff;
+  --topbar-bg: rgba(255, 255, 255, 0.9);
+  --sidebar-bg: #f8fafc;
+  --active-bg: #e8eef7;
+  --active-border: #c7d2e3;
+  --blue: #2563eb;
+  --green: #16a34a;
+  --red: #dc2626;
+  --amber: #d97706;
+  --teal: #0f766e;
+  --line: #e5eaf2;
+  --shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
+  --hairline-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  --knowledge-button-text: #334155;
+  --accent-soft-bg: rgba(37, 99, 235, 0.1);
+  --accent-soft-border: rgba(37, 99, 235, 0.34);
+  --accent-soft-text: #1d4ed8;
+  --danger-bg: rgba(220, 38, 38, 0.1);
+  --danger-border: rgba(220, 38, 38, 0.26);
+  --danger-text: #b91c1c;
+  --modal-backdrop: rgba(15, 23, 42, 0.42);
+  --switch-bg: #cbd5e1;
+  --switch-knob: #ffffff;
+  --gantt-header-bg: #ffffff;
+  --gantt-task-bg: #ffffff;
+  --gantt-assignment-bg: #f8fafc;
+  --gantt-busy-bg: #f1f5f9;
+  --hour-bg: #f8fafc;
+  --code-bg: #f8fafc;
+  --milestone-border: #ffffff;
+  --all-day-bg: rgba(37, 99, 235, 0.1);
+  --all-day-text: #1d4ed8;
+  --all-day-team-bg: rgba(22, 163, 74, 0.12);
+  --all-day-team-text: #15803d;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
   color: #e5e7eb;
   background: #08090b;
+  --app-bg: #08090b;
+  --auth-bg: radial-gradient(circle at top left, #151b2e, #08090b 42%);
   --border: #262a33;
   --muted: #8b93a5;
   --panel: #111318;
   --panel-soft: #0d0f14;
   --panel-raised: #171a21;
   --ink: #f4f7fb;
+  --body-text: #d8dee9;
+  --button-bg: #151922;
+  --button-hover-bg: #1b202b;
+  --button-hover-border: #3c4353;
+  --field-bg: #0c0f14;
+  --topbar-bg: rgba(10, 12, 16, 0.92);
+  --sidebar-bg: #0a0c10;
+  --active-bg: #151922;
+  --active-border: #2b3240;
   --blue: #5b8cff;
   --green: #39d98a;
   --red: #ff6b6b;
   --amber: #f5b342;
+  --teal: #0f766e;
   --line: #20242d;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --hairline-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+  --knowledge-button-text: #cfd7e6;
+  --accent-soft-bg: rgba(91, 140, 255, 0.16);
+  --accent-soft-border: rgba(91, 140, 255, 0.48);
+  --accent-soft-text: #dbe6ff;
+  --danger-bg: rgba(255, 107, 107, 0.12);
+  --danger-border: rgba(255, 107, 107, 0.35);
+  --danger-text: #ffc9c9;
+  --modal-backdrop: rgba(0, 0, 0, 0.68);
+  --switch-bg: #303746;
+  --switch-knob: #f6f8fb;
+  --gantt-header-bg: #111318;
+  --gantt-task-bg: #111318;
+  --gantt-assignment-bg: #0f1218;
+  --gantt-busy-bg: #0d1016;
+  --hour-bg: #0f1218;
+  --code-bg: #0b0e13;
+  --milestone-border: #111318;
+  --all-day-bg: rgba(91, 140, 255, 0.18);
+  --all-day-text: #c8d7ff;
+  --all-day-team-bg: rgba(57, 217, 138, 0.16);
+  --all-day-team-text: #b8f8d6;
 }
 
 * {
@@ -25,7 +111,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #08090b;
+  background: var(--app-bg);
 }
 
 button,
@@ -37,7 +123,7 @@ textarea {
 
 button {
   border: 1px solid var(--border);
-  background: #151922;
+  background: var(--button-bg);
   color: var(--ink);
   min-height: 34px;
   border-radius: 6px;
@@ -51,8 +137,8 @@ button {
 }
 
 button:hover {
-  border-color: #3c4353;
-  background: #1b202b;
+  border-color: var(--button-hover-border);
+  background: var(--button-hover-bg);
 }
 
 button:disabled {
@@ -66,7 +152,7 @@ textarea {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #0c0f14;
+  background: var(--field-bg);
   color: var(--ink);
   padding: 8px 10px;
   min-height: 36px;
@@ -105,8 +191,11 @@ small {
 .boot {
   min-height: 100vh;
   display: grid;
+  gap: 14px;
+  align-content: center;
   place-items: center;
   color: var(--muted);
+  background: var(--app-bg);
 }
 
 .auth-screen {
@@ -114,7 +203,7 @@ small {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: radial-gradient(circle at top left, #151b2e, #08090b 42%);
+  background: var(--auth-bg);
 }
 
 .auth-panel {
@@ -131,6 +220,29 @@ small {
   font-size: 26px;
 }
 
+.auth-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.theme-toggle {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border-color: var(--active-border);
+  background: var(--panel-soft);
+  color: var(--ink);
+}
+
+.theme-toggle:hover {
+  background: var(--panel-raised);
+}
+
+.theme-toggle span {
+  font-size: 12px;
+}
+
 .auth-panel label {
   display: grid;
   gap: 6px;
@@ -142,14 +254,14 @@ small {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  background: #08090b;
+  background: var(--app-bg);
 }
 
 .topbar {
   min-height: 64px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--border);
-  background: rgba(10, 12, 16, 0.92);
+  background: var(--topbar-bg);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -170,7 +282,7 @@ small {
 .app-sidebar {
   min-height: 100vh;
   border-right: 1px solid var(--border);
-  background: #0a0c10;
+  background: var(--sidebar-bg);
   padding: 16px 12px;
   display: grid;
   grid-template-rows: auto auto 1fr auto;
@@ -242,13 +354,13 @@ small {
   min-height: 28px;
   padding: 0 8px;
   flex: 0 0 auto;
-  color: #cfd7e6;
+  color: var(--knowledge-button-text);
 }
 
 .knowledge-top-button.active {
-  border-color: rgba(91, 140, 255, 0.48);
-  background: rgba(91, 140, 255, 0.16);
-  color: #dbe6ff;
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft-bg);
+  color: var(--accent-soft-text);
 }
 
 .topbar-controls {
@@ -307,8 +419,8 @@ small {
 }
 
 .project-item.active {
-  background: #151922;
-  border-color: #2b3240;
+  background: var(--active-bg);
+  border-color: var(--active-border);
 }
 
 .project-item span {
@@ -344,7 +456,7 @@ small {
   min-height: 18px;
   padding: 1px 4px;
   border-radius: 6px;
-  color: #c9d1df;
+  color: var(--body-text);
   font-size: 12px;
 }
 
@@ -375,14 +487,14 @@ small {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #cbd3e1;
+  color: var(--body-text);
 }
 
 .notice {
   margin: 12px 18px 0;
-  border: 1px solid rgba(255, 107, 107, 0.35);
-  background: rgba(255, 107, 107, 0.12);
-  color: #ffc9c9;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-text);
   border-radius: 6px;
   min-height: 38px;
   padding: 8px 10px;
@@ -401,9 +513,9 @@ small {
 }
 
 .inline-error {
-  color: #ffc9c9;
-  background: rgba(255, 107, 107, 0.12);
-  border: 1px solid rgba(255, 107, 107, 0.35);
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
@@ -415,10 +527,17 @@ small {
   border-color: var(--blue);
 }
 
+.primary-button:hover {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  filter: brightness(0.95);
+}
+
 button.danger {
-  border-color: rgba(255, 107, 107, 0.34);
-  background: rgba(255, 107, 107, 0.12);
-  color: #ffc9c9;
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
 
 .segmented {
@@ -427,7 +546,7 @@ button.danger {
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
-  background: #0c0f14;
+  background: var(--field-bg);
 }
 
 .segmented button {
@@ -438,8 +557,8 @@ button.danger {
 }
 
 .segmented button.active {
-  background: #252b36;
-  color: #fff;
+  background: var(--active-bg);
+  color: var(--ink);
 }
 
 .icon-button {
@@ -536,7 +655,7 @@ button.danger {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+  box-shadow: var(--hairline-shadow);
 }
 
 .side-panel {
@@ -614,8 +733,8 @@ button.danger {
 }
 
 .knowledge-doc-item.active {
-  background: #151922;
-  border-color: #2b3240;
+  background: var(--active-bg);
+  border-color: var(--active-border);
 }
 
 .knowledge-doc-empty {
@@ -638,7 +757,7 @@ button.danger {
   gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(17, 19, 24, 0.96);
+  background: var(--topbar-bg);
   backdrop-filter: blur(12px);
 }
 
@@ -651,7 +770,7 @@ button.danger {
   padding: 22px;
   display: grid;
   gap: 14px;
-  color: #d8dee9;
+  color: var(--body-text);
   line-height: 1.65;
 }
 
@@ -685,7 +804,7 @@ button.danger {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #0b0e13;
+  background: var(--code-bg);
 }
 
 .markdown-preview code {
@@ -774,7 +893,7 @@ button.danger {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(0, 0, 0, 0.68);
+  background: var(--modal-backdrop);
   backdrop-filter: blur(10px);
 }
 
@@ -782,8 +901,8 @@ button.danger {
   width: min(520px, 100%);
   max-height: min(720px, calc(100vh - 40px));
   overflow: auto;
-  background: #111318;
-  border: 1px solid #2b3240;
+  background: var(--panel);
+  border: 1px solid var(--active-border);
   border-radius: 10px;
   box-shadow: var(--shadow);
   padding: 16px;
@@ -852,7 +971,7 @@ button.danger {
   width: 38px;
   height: 22px;
   border-radius: 999px;
-  background: #303746;
+  background: var(--switch-bg);
   position: relative;
   flex: 0 0 auto;
   transition: background 0.16s ease;
@@ -866,7 +985,7 @@ button.danger {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #f6f8fb;
+  background: var(--switch-knob);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   transition: transform 0.16s ease;
 }
@@ -945,7 +1064,7 @@ button.danger {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: #111318;
+  background: var(--gantt-header-bg);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1013,15 +1132,15 @@ button.danger {
 }
 
 .gantt-row.task {
-  background: #111318;
+  background: var(--gantt-task-bg);
 }
 
 .gantt-row.assignment {
-  background: #0f1218;
+  background: var(--gantt-assignment-bg);
 }
 
 .gantt-row.busy {
-  background: #0d1016;
+  background: var(--gantt-busy-bg);
 }
 
 .tree-toggle {
@@ -1089,7 +1208,7 @@ button.danger {
 }
 
 .assignment-bar.team {
-  background: #0f766e;
+  background: var(--teal);
 }
 
 .busy-bar {
@@ -1130,7 +1249,7 @@ button.danger {
   height: 28px;
   min-height: 0;
   padding: 0;
-  border: 2px solid #111318;
+  border: 2px solid var(--milestone-border);
   border-radius: 6px 6px 2px 2px;
   transform: translateX(-50%);
 }
@@ -1165,21 +1284,21 @@ button.danger {
 
 .all-day-pill {
   border-radius: 6px;
-  background: rgba(91, 140, 255, 0.18);
-  color: #c8d7ff;
+  background: var(--all-day-bg);
+  color: var(--all-day-text);
   padding: 4px 8px;
   font-size: 12px;
 }
 
 .all-day-pill.team {
-  background: rgba(57, 217, 138, 0.16);
-  color: #b8f8d6;
+  background: var(--all-day-team-bg);
+  color: var(--all-day-team-text);
 }
 
 .hour-grid {
   position: relative;
   min-height: 1040px;
-  background: #0f1218;
+  background: var(--hour-bg);
 }
 
 .hour-line {
@@ -1211,7 +1330,7 @@ button.danger {
 }
 
 .personal-block.team {
-  background: #0f766e;
+  background: var(--teal);
   cursor: default;
 }
 
