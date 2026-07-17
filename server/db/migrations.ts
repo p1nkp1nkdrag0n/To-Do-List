@@ -487,12 +487,185 @@ CREATE INDEX idx_resource_versions_resource_version
 CREATE INDEX idx_activity_log_project_created ON activity_log(project_id, created_at DESC);
 `;
 
+const task2AuthTeamProjectsSchema = String.raw`
+ALTER TABLE team_members ADD COLUMN removed_at TEXT;
+ALTER TABLE team_members ADD COLUMN removed_by TEXT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE project_members ADD COLUMN removed_at TEXT;
+ALTER TABLE project_members ADD COLUMN removed_by TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE auth_attempts (
+  id TEXT PRIMARY KEY,
+  normalized_username TEXT NOT NULL,
+  ip_address TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'failed'
+    CHECK (state IN ('pending', 'failed')),
+  attempted_at TEXT NOT NULL
+);
+
+CREATE TABLE registration_hash_reservations (
+  id TEXT PRIMARY KEY,
+  authorization_key TEXT NOT NULL UNIQUE,
+  reserved_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_auth_attempts_username_time
+  ON auth_attempts(normalized_username, attempted_at);
+CREATE INDEX idx_auth_attempts_ip_time
+  ON auth_attempts(ip_address, attempted_at);
+CREATE INDEX idx_auth_attempts_attempted_at
+  ON auth_attempts(attempted_at);
+
+INSERT INTO team_members (user_id, joined_at, invited_by)
+SELECT project_members.user_id, MIN(project_members.joined_at), NULL
+  FROM project_members
+  LEFT JOIN team_members ON team_members.user_id = project_members.user_id
+ WHERE team_members.user_id IS NULL
+ GROUP BY project_members.user_id;
+
+CREATE INDEX idx_registration_hash_reservations_time
+  ON registration_hash_reservations(reserved_at);
+CREATE INDEX idx_team_members_active
+  ON team_members(removed_at, user_id);
+CREATE INDEX idx_project_members_active
+  ON project_members(project_id, removed_at, user_id);
+
+CREATE TRIGGER users_require_task_reassignment_before_disable
+BEFORE UPDATE OF disabled_at ON users
+WHEN OLD.disabled_at IS NULL
+ AND NEW.disabled_at IS NOT NULL
+ AND EXISTS (
+   SELECT 1 FROM task_participants
+    WHERE user_id = OLD.id
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'user still has task participants that require reassignment');
+END;
+
+CREATE TRIGGER team_members_require_enabled_user_insert
+BEFORE INSERT ON team_members
+WHEN NEW.removed_at IS NULL AND NOT EXISTS (
+  SELECT 1 FROM users
+   WHERE id = NEW.user_id AND disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'team member must reference an enabled user');
+END;
+
+CREATE TRIGGER team_members_require_enabled_user_update
+BEFORE UPDATE OF user_id, removed_at ON team_members
+WHEN NEW.removed_at IS NULL AND NOT EXISTS (
+  SELECT 1 FROM users
+   WHERE id = NEW.user_id AND disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'team member must reference an enabled user');
+END;
+
+CREATE TRIGGER project_members_require_team_insert
+BEFORE INSERT ON project_members
+WHEN NEW.removed_at IS NULL AND NOT EXISTS (
+  SELECT 1
+    FROM team_members
+    JOIN users ON users.id = team_members.user_id
+   WHERE team_members.user_id = NEW.user_id
+     AND team_members.removed_at IS NULL
+     AND users.disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'project member must belong to team as an active team member');
+END;
+
+CREATE TRIGGER project_members_require_team_update
+BEFORE UPDATE OF user_id, removed_at ON project_members
+WHEN NEW.removed_at IS NULL AND NOT EXISTS (
+  SELECT 1
+    FROM team_members
+    JOIN users ON users.id = team_members.user_id
+   WHERE team_members.user_id = NEW.user_id
+     AND team_members.removed_at IS NULL
+     AND users.disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'project member must belong to team as an active team member');
+END;
+
+CREATE TRIGGER task_participants_require_active_member_insert
+BEFORE INSERT ON task_participants
+WHEN NOT EXISTS (
+  SELECT 1
+    FROM project_members
+    JOIN users ON users.id = project_members.user_id
+   WHERE project_members.project_id = NEW.project_id
+     AND project_members.user_id = NEW.user_id
+     AND project_members.removed_at IS NULL
+     AND users.disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'task participant must be an active project member with an enabled user');
+END;
+
+CREATE TRIGGER task_participants_require_active_member_update
+BEFORE UPDATE OF project_id, user_id ON task_participants
+WHEN NOT EXISTS (
+  SELECT 1
+    FROM project_members
+    JOIN users ON users.id = project_members.user_id
+   WHERE project_members.project_id = NEW.project_id
+     AND project_members.user_id = NEW.user_id
+     AND project_members.removed_at IS NULL
+     AND users.disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'task participant must be an active project member with an enabled user');
+END;
+
+CREATE TRIGGER project_members_preserve_task_participants
+BEFORE UPDATE OF removed_at ON project_members
+WHEN OLD.removed_at IS NULL
+ AND NEW.removed_at IS NOT NULL
+ AND EXISTS (
+   SELECT 1 FROM task_participants
+    WHERE project_id = OLD.project_id AND user_id = OLD.user_id
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'project member still has task participants');
+END;
+
+CREATE TRIGGER team_members_preserve_active_project_memberships
+BEFORE UPDATE OF removed_at ON team_members
+WHEN OLD.removed_at IS NULL
+ AND NEW.removed_at IS NOT NULL
+ AND EXISTS (
+   SELECT 1 FROM project_members
+    WHERE user_id = OLD.user_id AND removed_at IS NULL
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'team member still has active project memberships');
+END;
+
+CREATE TRIGGER team_members_preserve_project_memberships
+BEFORE DELETE ON team_members
+WHEN EXISTS (
+  SELECT 1 FROM project_members
+   WHERE user_id = OLD.user_id AND removed_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'team member still has project memberships');
+END;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "v2_baseline",
     sql: baselineSchema,
     checksum: migrationChecksum(baselineSchema),
+  },
+  {
+    version: 2,
+    name: "task2_auth_team_projects",
+    sql: task2AuthTeamProjectsSchema,
+    checksum: migrationChecksum(task2AuthTeamProjectsSchema),
   },
 ];
 

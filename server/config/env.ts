@@ -5,6 +5,10 @@ import { z } from "zod";
 export const DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 const DEVELOPMENT_SESSION_SECRET = "development-only-v2-session-secret";
+const DEVELOPMENT_BOOTSTRAP_CODE = "development-bootstrap-code";
+const SESSION_SECRET_PLACEHOLDER =
+  "replace-with-at-least-32-random-characters";
+const BOOTSTRAP_CODE_PLACEHOLDER = "replace-with-a-unique-bootstrap-code";
 
 const BooleanEnvironmentValueSchema = z
   .enum(["true", "false", "1", "0"])
@@ -29,6 +33,8 @@ const EnvironmentSchema = z.object({
   PORT: z.coerce.number().int().min(0).max(65_535).default(4000),
   SESSION_SECRET: z.string().optional(),
   COOKIE_SECURE: BooleanEnvironmentValueSchema,
+  TRUST_PROXY_HOPS: z.coerce.number().int().nonnegative().default(0),
+  BOOTSTRAP_CODE: z.string().optional(),
 });
 
 export interface AppConfig {
@@ -41,6 +47,8 @@ export interface AppConfig {
   port: number;
   sessionSecret: string;
   cookieSecure: boolean;
+  trustProxyHops: number;
+  bootstrapCode: string;
 }
 
 function resolveConfiguredPath(
@@ -87,10 +95,13 @@ export function parseConfig(
 ): AppConfig {
   const parsed = EnvironmentSchema.parse(environment);
   const sessionSecret = parsed.SESSION_SECRET ?? DEVELOPMENT_SESSION_SECRET;
+  const bootstrapCode = parsed.BOOTSTRAP_CODE ?? DEVELOPMENT_BOOTSTRAP_CODE;
 
   if (
     parsed.NODE_ENV === "production" &&
-    (sessionSecret.length < 32 || sessionSecret === DEVELOPMENT_SESSION_SECRET)
+    (sessionSecret.length < 32 ||
+      sessionSecret === DEVELOPMENT_SESSION_SECRET ||
+      sessionSecret === SESSION_SECRET_PLACEHOLDER)
   ) {
     throw new Error(
       "SESSION_SECRET must be set to a unique value of at least 32 characters in production.",
@@ -99,6 +110,16 @@ export function parseConfig(
   if (parsed.NODE_ENV === "production" && parsed.COOKIE_SECURE === undefined) {
     throw new Error(
       "COOKIE_SECURE must be explicitly set to true or false in production.",
+    );
+  }
+  if (
+    parsed.NODE_ENV === "production" &&
+    (bootstrapCode.length < 12 ||
+      bootstrapCode === DEVELOPMENT_BOOTSTRAP_CODE ||
+      bootstrapCode === BOOTSTRAP_CODE_PLACEHOLDER)
+  ) {
+    throw new Error(
+      "BOOTSTRAP_CODE must be set to a unique value of at least 12 characters in production.",
     );
   }
 
@@ -127,5 +148,7 @@ export function parseConfig(
     port: parsed.PORT,
     sessionSecret,
     cookieSecure: parsed.COOKIE_SECURE ?? false,
+    trustProxyHops: parsed.TRUST_PROXY_HOPS,
+    bootstrapCode,
   };
 }

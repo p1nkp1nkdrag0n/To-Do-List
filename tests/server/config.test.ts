@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -21,6 +22,8 @@ describe("v2 environment configuration", () => {
       host: "0.0.0.0",
       port: 4000,
       cookieSecure: false,
+      trustProxyHops: 0,
+      bootstrapCode: "development-bootstrap-code",
     });
     expect(DEFAULT_MAX_UPLOAD_BYTES).toBe(200 * 1024 * 1024);
     expect(config.uploadPath.startsWith(path.join(root, "dist"))).toBe(false);
@@ -39,6 +42,7 @@ describe("v2 environment configuration", () => {
         PORT: "4100",
         SESSION_SECRET: "local-secret",
         COOKIE_SECURE: "true",
+        TRUST_PROXY_HOPS: "1",
       },
       root,
     );
@@ -50,6 +54,7 @@ describe("v2 environment configuration", () => {
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(4100);
     expect(config.cookieSecure).toBe(true);
+    expect(config.trustProxyHops).toBe(1);
   });
 
   it.each([
@@ -100,6 +105,14 @@ describe("v2 environment configuration", () => {
     expect(() =>
       parseConfig({ NODE_ENV: "production", SESSION_SECRET: "too-short" }),
     ).toThrow(/SESSION_SECRET/i);
+    expect(() =>
+      parseConfig({
+        NODE_ENV: "production",
+        SESSION_SECRET: "replace-with-at-least-32-random-characters",
+        COOKIE_SECURE: "true",
+        BOOTSTRAP_CODE: "a-safe-bootstrap-code",
+      }),
+    ).toThrow(/SESSION_SECRET/i);
   });
 
   it("requires COOKIE_SECURE to be explicit in production", () => {
@@ -111,6 +124,29 @@ describe("v2 environment configuration", () => {
     ).toThrow(/COOKIE_SECURE.*(?:explicit|true|false)/i);
   });
 
+  it("requires an explicit safe bootstrap code in production", () => {
+    const production = {
+      NODE_ENV: "production",
+      SESSION_SECRET: "a-strong-production-secret-with-32-chars",
+      COOKIE_SECURE: "true",
+    };
+
+    expect(() => parseConfig(production)).toThrow(/BOOTSTRAP_CODE/i);
+    expect(() =>
+      parseConfig({ ...production, BOOTSTRAP_CODE: "too-short" }),
+    ).toThrow(/BOOTSTRAP_CODE/i);
+    expect(() =>
+      parseConfig({
+        ...production,
+        BOOTSTRAP_CODE: "replace-with-a-unique-bootstrap-code",
+      }),
+    ).toThrow(/BOOTSTRAP_CODE/i);
+    expect(
+      parseConfig({ ...production, BOOTSTRAP_CODE: "a-safe-bootstrap-code" })
+        .bootstrapCode,
+    ).toBe("a-safe-bootstrap-code");
+  });
+
   it.each([
     ["false", false],
     ["true", true],
@@ -119,8 +155,9 @@ describe("v2 environment configuration", () => {
     (cookieSecure, expected) => {
       const config = parseConfig({
         NODE_ENV: "production",
-        SESSION_SECRET: "a-strong-production-secret-with-32-chars",
-        COOKIE_SECURE: cookieSecure,
+      SESSION_SECRET: "a-strong-production-secret-with-32-chars",
+      COOKIE_SECURE: cookieSecure,
+      BOOTSTRAP_CODE: "a-safe-bootstrap-code",
       });
 
       expect(config.cookieSecure).toBe(expected);
@@ -132,9 +169,57 @@ describe("v2 environment configuration", () => {
       NODE_ENV: "production",
       SESSION_SECRET: "a-strong-production-secret-with-32-chars",
       COOKIE_SECURE: "1",
+      BOOTSTRAP_CODE: "a-safe-bootstrap-code",
     });
 
     expect(config.environment).toBe("production");
     expect(config.cookieSecure).toBe(true);
+  });
+
+  it.each(["-1", "1.5", "not-a-number"])(
+    "rejects invalid TRUST_PROXY_HOPS=%s",
+    (trustProxyHops) => {
+      expect(() => parseConfig({ TRUST_PROXY_HOPS: trustProxyHops })).toThrow(
+        /TRUST_PROXY_HOPS|number/i,
+      );
+    },
+  );
+
+  it("ships a Caddy-safe production environment example", () => {
+    const example = fs.readFileSync(
+      path.resolve("deploy/team-project-manager-v2.env.example"),
+      "utf8",
+    );
+    const caddyfile = fs.readFileSync(
+      path.resolve("deploy/Caddyfile.example"),
+      "utf8",
+    );
+    const activeSettings = Object.fromEntries(
+      example
+        .split(/\r?\n/)
+        .filter((line) => line !== "" && !line.startsWith("#"))
+        .map((line) => {
+          const separator = line.indexOf("=");
+          return [line.slice(0, separator), line.slice(separator + 1)];
+        }),
+    );
+
+    expect(activeSettings).toMatchObject({
+      HOST: "127.0.0.1",
+      COOKIE_SECURE: "true",
+      TRUST_PROXY_HOPS: "1",
+    });
+    expect(example).toMatch(
+      /# For a trusted direct HTTP LAN deployment[^\r\n]*\r?\n# HOST=0\.0\.0\.0\r?\n# COOKIE_SECURE=false\r?\n# TRUST_PROXY_HOPS=0/,
+    );
+    const caddyUpstream = caddyfile.match(
+      /^\s*reverse_proxy\s+([^\s:]+):(\d+)\s*$/m,
+    );
+    expect(caddyUpstream).not.toBeNull();
+    expect({ host: caddyUpstream?.[1], port: caddyUpstream?.[2] }).toEqual({
+      host: activeSettings.HOST,
+      port: activeSettings.PORT,
+    });
+    expect(caddyUpstream?.[1]).toBe("127.0.0.1");
   });
 });

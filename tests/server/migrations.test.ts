@@ -19,9 +19,12 @@ import {
 const databases: V2Database[] = [];
 const temporaryDirectories: string[] = [];
 const timestamp = "2026-07-17T08:30:00.000Z";
+const task1MigrationChecksum =
+  "56c7054dda8fe1ea4278678688957b9156cbcb517dc9cfada9830efa12cf5a13";
 
 const requiredTables = [
   "activity_log",
+  "auth_attempts",
   "availability_exceptions",
   "availability_profiles",
   "availability_slots",
@@ -29,6 +32,7 @@ const requiredTables = [
   "milestones",
   "phases",
   "progress_updates",
+  "registration_hash_reservations",
   "project_invites",
   "project_members",
   "project_tags",
@@ -246,6 +250,163 @@ describe("v2 schema migrations", () => {
     ).toEqual({ checksum: expectedChecksum });
   });
 
+  it("keeps Task 1 migration history immutable and upgrades it", () => {
+    const database = openV2Database(":memory:");
+    databases.push(database);
+    const task1Migration = MIGRATIONS[0]!;
+
+    expect(task1Migration.version).toBe(1);
+    expect(task1Migration.checksum).toBe(task1MigrationChecksum);
+
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY CHECK (version >= 1),
+        name TEXT NOT NULL UNIQUE,
+        checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+        applied_at TEXT NOT NULL
+      );
+      ${task1Migration.sql}
+    `);
+    database.run(
+      `INSERT INTO schema_migrations (version, name, checksum, applied_at)
+       VALUES (?, ?, ?, ?)`,
+      [
+        task1Migration.version,
+        task1Migration.name,
+        task1MigrationChecksum,
+        timestamp,
+      ],
+    );
+
+    expect(() => migrateV2Database(database)).not.toThrow();
+    expect(
+      database.all<{ version: number }>(
+        "SELECT version FROM schema_migrations ORDER BY version",
+      ),
+    ).toEqual(MIGRATIONS.map(({ version }) => ({ version })));
+    expect(
+      database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'auth_attempts'",
+      ),
+    ).toEqual({ count: 1 });
+  });
+
+  it("repairs orphan project members while upgrading Task 1 data", () => {
+    const database = openV2Database(":memory:");
+    databases.push(database);
+    const task1Migration = MIGRATIONS[0]!;
+    const ownerId = "00000000-0000-4000-8000-000000000070";
+    const orphanId = "00000000-0000-4000-8000-000000000071";
+    const outsideId = "00000000-0000-4000-8000-000000000072";
+    const projectId = "00000000-0000-4000-8000-000000000073";
+    const taskId = "00000000-0000-4000-8000-000000000074";
+
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY CHECK (version >= 1),
+        name TEXT NOT NULL UNIQUE,
+        checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+        applied_at TEXT NOT NULL
+      );
+      ${task1Migration.sql}
+    `);
+    database.run(
+      `INSERT INTO schema_migrations (version, name, checksum, applied_at)
+       VALUES (1, ?, ?, ?)`,
+      [task1Migration.name, task1MigrationChecksum, timestamp],
+    );
+    for (const [id, username] of [
+      [ownerId, "owner"],
+      [orphanId, "orphan"],
+      [outsideId, "outside"],
+    ]) {
+      database.run(
+        `INSERT INTO users
+          (id, username, password_hash, display_name, created_at, updated_at)
+         VALUES (?, ?, 'hash', ?, ?, ?)`,
+        [id, username, username, timestamp, timestamp],
+      );
+    }
+    database.run(
+      "INSERT INTO team_members (user_id, joined_at) VALUES (?, ?)",
+      [ownerId, timestamp],
+    );
+    database.run(
+      `INSERT INTO projects
+        (id, name, created_by, updated_by, created_at, updated_at)
+       VALUES (?, 'Existing project', ?, ?, ?, ?)`,
+      [projectId, ownerId, ownerId, timestamp, timestamp],
+    );
+    for (const [userId, color] of [
+      [ownerId, "#2563eb"],
+      [orphanId, "#dc2626"],
+    ]) {
+      database.run(
+        `INSERT INTO project_members
+          (project_id, user_id, color, joined_at, added_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [projectId, userId, color, timestamp, ownerId],
+      );
+    }
+    database.run(
+      `INSERT INTO tasks
+        (id, project_id, title, status, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, 'Existing task', 'not_started', ?, ?, ?, ?)`,
+      [taskId, projectId, ownerId, ownerId, timestamp, timestamp],
+    );
+    database.run(
+      `INSERT INTO task_participants
+        (id, project_id, task_id, user_id, start_date, end_date,
+         estimated_minutes, status, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 60, 'not_started',
+               ?, ?, ?, ?)`,
+      [
+        "00000000-0000-4000-8000-000000000075",
+        projectId,
+        taskId,
+        orphanId,
+        ownerId,
+        ownerId,
+        timestamp,
+        timestamp,
+      ],
+    );
+
+    migrateV2Database(database);
+
+    expect(
+      database.get<{ count: number }>(
+        `SELECT COUNT(*) AS count
+           FROM project_members
+           LEFT JOIN team_members ON team_members.user_id = project_members.user_id
+          WHERE team_members.user_id IS NULL`,
+      ),
+    ).toEqual({ count: 0 });
+    expect(
+      database.get<{ joined_at: string }>(
+        "SELECT joined_at FROM team_members WHERE user_id = ?",
+        [orphanId],
+      ),
+    ).toEqual({ joined_at: timestamp });
+    expect(
+      database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM task_participants WHERE user_id = ?",
+        [orphanId],
+      ),
+    ).toEqual({ count: 1 });
+    expect(() =>
+      database.run(
+        `INSERT INTO project_members
+          (project_id, user_id, color, joined_at, added_by)
+         VALUES (?, ?, '#16a34a', ?, ?)`,
+        [projectId, outsideId, timestamp, ownerId],
+      ),
+    ).toThrow(/project member must belong to team/i);
+    expect(() =>
+      database.run("DELETE FROM team_members WHERE user_id = ?", [orphanId]),
+    ).toThrow(/team member still has project memberships/i);
+  });
+
   it("rejects a database created by a newer migration version", () => {
     const database = openV2Database(":memory:");
     databases.push(database);
@@ -406,7 +567,7 @@ describe("v2 schema migrations", () => {
       database.get<{ count: number }>(
         "SELECT COUNT(*) AS count FROM schema_migrations",
       ),
-    ).toEqual({ count: 1 });
+    ).toEqual({ count: MIGRATIONS.length });
   });
 
   it("enforces foreign keys", () => {
@@ -427,6 +588,390 @@ describe("v2 schema migrations", () => {
         ],
       ),
     ).toThrow(/FOREIGN KEY/i);
+  });
+
+  it("requires project members to belong to the fixed team without cascading recoverable memberships", () => {
+    const database = migratedDatabase();
+    const seeded = seedProject(database);
+    const outsideUserId = "00000000-0000-4000-8000-000000000098";
+    database.run(
+      `INSERT INTO users
+        (id, username, password_hash, display_name, created_at, updated_at)
+       VALUES (?, 'outside', 'hash', 'Outside', ?, ?)`,
+      [outsideUserId, timestamp, timestamp],
+    );
+
+    expect(() =>
+      database.run(
+        `INSERT INTO project_members
+          (project_id, user_id, color, joined_at, added_by)
+         VALUES (?, ?, '#dc2626', ?, ?)`,
+        [seeded.projectId, outsideUserId, timestamp, seeded.userId],
+      ),
+    ).toThrow(/project member must belong to team/i);
+
+    database.run(
+      "INSERT INTO team_members (user_id, joined_at) VALUES (?, ?)",
+      [outsideUserId, timestamp],
+    );
+    database.run(
+      `INSERT INTO project_members
+        (project_id, user_id, color, joined_at, added_by)
+       VALUES (?, ?, '#dc2626', ?, ?)`,
+      [seeded.projectId, outsideUserId, timestamp, seeded.userId],
+    );
+    expect(() =>
+      database.run("DELETE FROM team_members WHERE user_id = ?", [outsideUserId]),
+    ).toThrow(/team member still has project memberships/i);
+
+    expect(
+      database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM project_members WHERE user_id = ?",
+        [outsideUserId],
+      ),
+    ).toEqual({ count: 1 });
+
+    database.run("DELETE FROM project_members WHERE user_id = ?", [outsideUserId]);
+    database.run("DELETE FROM team_members WHERE user_id = ?", [outsideUserId]);
+
+    expect(
+      database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM team_members WHERE user_id = ?",
+        [outsideUserId],
+      ),
+    ).toEqual({ count: 0 });
+  });
+
+  it("adds revision-preserving membership tombstones and enforces active-team integrity", () => {
+    const database = migratedDatabase();
+    const seeded = seedProject(database);
+
+    expect(
+      database.all<{ name: string }>("PRAGMA table_info(team_members)").map(({ name }) => name),
+    ).toEqual(expect.arrayContaining(["removed_at", "removed_by"]));
+    expect(
+      database
+        .all<{ name: string }>("PRAGMA table_info(project_members)")
+        .map(({ name }) => name),
+    ).toEqual(expect.arrayContaining(["removed_at", "removed_by"]));
+
+    expect(() =>
+      database.run(
+        `UPDATE team_members
+            SET removed_at = ?, removed_by = ?, revision = revision + 1
+          WHERE user_id = ?`,
+        [timestamp, seeded.userId, seeded.userId],
+      ),
+    ).toThrow(/active project memberships/i);
+
+    database.run(
+      `UPDATE project_members
+          SET removed_at = ?, removed_by = ?, revision = revision + 1
+        WHERE project_id = ? AND user_id = ?`,
+      [timestamp, seeded.userId, seeded.projectId, seeded.userId],
+    );
+    database.run(
+      `UPDATE team_members
+          SET removed_at = ?, removed_by = ?, revision = revision + 1
+        WHERE user_id = ?`,
+      [timestamp, seeded.userId, seeded.userId],
+    );
+    expect(() =>
+      database.run(
+        `UPDATE project_members
+            SET removed_at = NULL, removed_by = NULL, revision = revision + 1
+          WHERE project_id = ? AND user_id = ?`,
+        [seeded.projectId, seeded.userId],
+      ),
+    ).toThrow(/active team member/i);
+    expect(
+      database.get<{
+        teamRevision: number;
+        teamRemovedAt: string | null;
+        projectRevision: number;
+        projectRemovedAt: string | null;
+      }>(
+        `SELECT
+           (SELECT revision FROM team_members WHERE user_id = ?) AS teamRevision,
+           (SELECT removed_at FROM team_members WHERE user_id = ?) AS teamRemovedAt,
+           (SELECT revision FROM project_members WHERE project_id = ? AND user_id = ?)
+             AS projectRevision,
+           (SELECT removed_at FROM project_members WHERE project_id = ? AND user_id = ?)
+             AS projectRemovedAt`,
+        [
+          seeded.userId,
+          seeded.userId,
+          seeded.projectId,
+          seeded.userId,
+          seeded.projectId,
+          seeded.userId,
+        ],
+      ),
+    ).toEqual({
+      teamRevision: 2,
+      teamRemovedAt: timestamp,
+      projectRevision: 2,
+      projectRemovedAt: timestamp,
+    });
+  });
+
+  it("prevents soft-removing a project member that still owns task participants", () => {
+    const database = migratedDatabase();
+    const seeded = seedProject(database);
+    database.run(
+      `INSERT INTO task_participants
+        (id, project_id, task_id, user_id, start_date, end_date,
+         estimated_minutes, status, created_by, updated_by, created_at, updated_at)
+       VALUES ('participant-removal-guard', ?, ?, ?, '2026-07-18', '2026-07-19',
+               60, 'not_started', ?, ?, ?, ?)`,
+      [
+        seeded.projectId,
+        seeded.taskId,
+        seeded.userId,
+        seeded.userId,
+        seeded.userId,
+        timestamp,
+        timestamp,
+      ],
+    );
+
+    expect(() =>
+      database.run(
+        `UPDATE project_members
+            SET removed_at = ?, removed_by = ?, revision = revision + 1
+          WHERE project_id = ? AND user_id = ?`,
+        [timestamp, seeded.userId, seeded.projectId, seeded.userId],
+      ),
+    ).toThrow(/task participants/i);
+    expect(
+      database.get<{ removed_at: string | null; revision: number }>(
+        `SELECT removed_at, revision FROM project_members
+          WHERE project_id = ? AND user_id = ?`,
+        [seeded.projectId, seeded.userId],
+      ),
+    ).toEqual({ removed_at: null, revision: 1 });
+  });
+
+  it("requires task reassignment before disabling a participant user", () => {
+    const database = migratedDatabase();
+    const seeded = seedProject(database);
+    database.run(
+      `INSERT INTO task_participants
+        (id, project_id, task_id, user_id, start_date, end_date,
+         estimated_minutes, status, created_by, updated_by, created_at, updated_at)
+       VALUES ('participant-disable-guard', ?, ?, ?, '2026-07-18', '2026-07-19',
+               60, 'not_started', ?, ?, ?, ?)`,
+      [
+        seeded.projectId,
+        seeded.taskId,
+        seeded.userId,
+        seeded.userId,
+        seeded.userId,
+        timestamp,
+        timestamp,
+      ],
+    );
+
+    expect(() =>
+      database.run(
+        `UPDATE users
+            SET disabled_at = ?, revision = revision + 1
+          WHERE id = ?`,
+        [timestamp, seeded.userId],
+      ),
+    ).toThrow(/task participants/i);
+    expect(
+      database.get<{ disabled_at: string | null; revision: number }>(
+        "SELECT disabled_at, revision FROM users WHERE id = ?",
+        [seeded.userId],
+      ),
+    ).toEqual({ disabled_at: null, revision: 1 });
+
+    database.run(
+      "DELETE FROM task_participants WHERE id = 'participant-disable-guard'",
+    );
+    database.run(
+      `UPDATE users
+          SET disabled_at = ?, revision = revision + 1
+        WHERE id = ?`,
+      [timestamp, seeded.userId],
+    );
+    expect(
+      database.get<{ disabled_at: string | null; revision: number }>(
+        "SELECT disabled_at, revision FROM users WHERE id = ?",
+        [seeded.userId],
+      ),
+    ).toEqual({ disabled_at: timestamp, revision: 2 });
+
+    database.run(
+      `UPDATE users
+          SET disabled_at = NULL, revision = revision + 1
+        WHERE id = ?`,
+      [seeded.userId],
+    );
+    expect(
+      database.get<{ disabled_at: string | null; revision: number }>(
+        "SELECT disabled_at, revision FROM users WHERE id = ?",
+        [seeded.userId],
+      ),
+    ).toEqual({ disabled_at: null, revision: 3 });
+  });
+
+  it("requires enabled active project membership for task participant inserts and updates", () => {
+    const database = migratedDatabase();
+    const seeded = seedProject(database);
+    const alternateUserId = "00000000-0000-4000-8000-000000000031";
+    database.run(
+      `INSERT INTO users
+        (id, username, password_hash, display_name, created_at, updated_at)
+       VALUES (?, 'alternate', 'hash', 'Alternate', ?, ?)`,
+      [alternateUserId, timestamp, timestamp],
+    );
+    database.run(
+      "INSERT INTO team_members (user_id, joined_at) VALUES (?, ?)",
+      [alternateUserId, timestamp],
+    );
+    database.run(
+      `INSERT INTO project_members
+        (project_id, user_id, color, joined_at, added_by)
+       VALUES (?, ?, '#16a34a', ?, ?)`,
+      [seeded.projectId, alternateUserId, timestamp, seeded.userId],
+    );
+
+    const insertParticipant = (id: string, userId: string): void => {
+      database.run(
+        `INSERT INTO task_participants
+          (id, project_id, task_id, user_id, start_date, end_date,
+           estimated_minutes, status, created_by, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 60, 'not_started',
+                 ?, ?, ?, ?)`,
+        [
+          id,
+          seeded.projectId,
+          seeded.taskId,
+          userId,
+          seeded.userId,
+          seeded.userId,
+          timestamp,
+          timestamp,
+        ],
+      );
+    };
+
+    insertParticipant("participant-active", seeded.userId);
+    database.run(
+      `UPDATE project_members
+          SET removed_at = ?, removed_by = ?, revision = revision + 1
+        WHERE project_id = ? AND user_id = ?`,
+      [timestamp, seeded.userId, seeded.projectId, alternateUserId],
+    );
+    expect(() => insertParticipant("participant-tombstoned", alternateUserId))
+      .toThrow(/active project member/i);
+    expect(() =>
+      database.run(
+        "UPDATE task_participants SET user_id = ? WHERE id = 'participant-active'",
+        [alternateUserId],
+      ),
+    ).toThrow(/active project member/i);
+
+    database.run(
+      `UPDATE project_members
+          SET removed_at = NULL, removed_by = NULL, revision = revision + 1
+        WHERE project_id = ? AND user_id = ?`,
+      [seeded.projectId, alternateUserId],
+    );
+    database.run(
+      "UPDATE users SET disabled_at = ?, revision = revision + 1 WHERE id = ?",
+      [timestamp, alternateUserId],
+    );
+    expect(() => insertParticipant("participant-disabled", alternateUserId))
+      .toThrow(/active project member/i);
+    expect(() =>
+      database.run(
+        "UPDATE task_participants SET user_id = ? WHERE id = 'participant-active'",
+        [alternateUserId],
+      ),
+    ).toThrow(/active project member/i);
+    expect(
+      database.get<{ user_id: string }>(
+        "SELECT user_id FROM task_participants WHERE id = 'participant-active'",
+      ),
+    ).toEqual({ user_id: seeded.userId });
+  });
+
+  it("requires enabled users when activating team and project memberships", () => {
+    const database = migratedDatabase();
+    const seeded = seedProject(database);
+    const disabledUserId = "00000000-0000-4000-8000-000000000032";
+    database.run(
+      `INSERT INTO users
+        (id, username, password_hash, display_name, disabled_at, created_at, updated_at)
+       VALUES (?, 'disabled', 'hash', 'Disabled', ?, ?, ?)`,
+      [disabledUserId, timestamp, timestamp, timestamp],
+    );
+    expect(() =>
+      database.run(
+        "INSERT INTO team_members (user_id, joined_at) VALUES (?, ?)",
+        [disabledUserId, timestamp],
+      ),
+    ).toThrow(/enabled user/i);
+
+    const laterDisabledUserId = "00000000-0000-4000-8000-000000000033";
+    database.run(
+      `INSERT INTO users
+        (id, username, password_hash, display_name, created_at, updated_at)
+       VALUES (?, 'later-disabled', 'hash', 'Later Disabled', ?, ?)`,
+      [laterDisabledUserId, timestamp, timestamp],
+    );
+    database.run(
+      "INSERT INTO team_members (user_id, joined_at) VALUES (?, ?)",
+      [laterDisabledUserId, timestamp],
+    );
+    database.run(
+      "UPDATE users SET disabled_at = ?, revision = revision + 1 WHERE id = ?",
+      [timestamp, laterDisabledUserId],
+    );
+    expect(() =>
+      database.run(
+        `INSERT INTO project_members
+          (project_id, user_id, color, joined_at, added_by)
+         VALUES (?, ?, '#dc2626', ?, ?)`,
+        [seeded.projectId, laterDisabledUserId, timestamp, seeded.userId],
+      ),
+    ).toThrow(/active team member/i);
+    database.run(
+      `UPDATE team_members
+          SET removed_at = ?, removed_by = ?, revision = revision + 1
+        WHERE user_id = ?`,
+      [timestamp, seeded.userId, laterDisabledUserId],
+    );
+    expect(() =>
+      database.run(
+        `UPDATE team_members
+            SET removed_at = NULL, removed_by = NULL, revision = revision + 1
+          WHERE user_id = ?`,
+        [laterDisabledUserId],
+      ),
+    ).toThrow(/enabled user/i);
+  });
+
+  it("stores one registration hash reservation per authorization key", () => {
+    const database = migratedDatabase();
+    database.run(
+      `INSERT INTO registration_hash_reservations
+        (id, authorization_key, reserved_at)
+       VALUES ('reservation-1', 'registration_invite:invite-1', ?)`,
+      [timestamp],
+    );
+
+    expect(() =>
+      database.run(
+        `INSERT INTO registration_hash_reservations
+          (id, authorization_key, reserved_at)
+         VALUES ('reservation-2', 'registration_invite:invite-1', ?)`,
+        [timestamp],
+      ),
+    ).toThrow(/UNIQUE/i);
   });
 
   it("allows only one participant record per task and member", () => {
