@@ -10,7 +10,13 @@ import {
   createProjectInviteRedemptionRouter,
   createProjectInviteRouter,
 } from "../modules/invites/invite-router.js";
+import {
+  createProjectLifecycleRouter,
+  createTrashRouter,
+} from "../modules/lifecycle/lifecycle-router.js";
 import { createProjectRouter } from "../modules/projects/project-router.js";
+import { createProjectWriteGuard } from "../modules/projects/project-write-guard.js";
+import { createResourceRouter } from "../modules/resources/resource-router.js";
 import { createScheduleRouter } from "../modules/schedule/schedule-router.js";
 import { createTeamRouter } from "../modules/team/team-router.js";
 import {
@@ -32,9 +38,13 @@ export function createV2App(dependencies: V2AppDependencies): Express {
   const requireAuth = createRequireAuth(runtime);
   app.use("/api/team", requireAuth, createTeamRouter(runtime));
   app.use("/api/me", requireAuth, createMeAvailabilityRouter(runtime));
+  app.use("/api/trash", requireAuth, createTrashRouter(runtime));
   app.use(
     "/api/projects",
     requireAuth,
+    createProjectLifecycleRouter(runtime),
+    createProjectWriteGuard(runtime),
+    createResourceRouter(runtime),
     createProjectAvailabilityRouter(runtime),
     createProjectInviteRouter(runtime),
     createScheduleRouter(runtime),

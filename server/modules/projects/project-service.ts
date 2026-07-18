@@ -124,6 +124,7 @@ export class ProjectService {
           WHERE project_members.user_id = ?
             AND project_members.removed_at IS NULL
             AND projects.deleted_at IS NULL
+            AND projects.archived_at IS NULL
           ORDER BY projects.updated_at DESC, projects.name COLLATE NOCASE`,
         [auth.user.id],
       )

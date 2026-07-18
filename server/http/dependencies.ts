@@ -1,8 +1,11 @@
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
+import path from "node:path";
 
 import bcrypt from "bcryptjs";
 
+import { DEFAULT_MAX_UPLOAD_BYTES } from "../config/env.js";
 import type { V2Database } from "../db/database.js";
+import { BlobStore } from "../modules/resources/blob-store.js";
 import type { V2Logger } from "./errors.js";
 
 export const defaultV2Logger: V2Logger = {
@@ -16,6 +19,9 @@ export interface V2AppDependencies {
   sessionSecret: string;
   cookieSecure: boolean;
   bootstrapCode: string;
+  uploadPath?: string;
+  maxUploadBytes?: number;
+  blobStore?: BlobStore;
   trustProxyHops?: number;
   clock?: () => Date;
   idGenerator?: () => string;
@@ -32,6 +38,9 @@ export interface V2RuntimeDependencies {
   sessionSecret: string;
   cookieSecure: boolean;
   bootstrapCode: string;
+  uploadPath: string;
+  maxUploadBytes: number;
+  blobStore: BlobStore;
   trustProxyHops: number;
   clock: () => Date;
   idGenerator: () => string;
@@ -46,8 +55,17 @@ export interface V2RuntimeDependencies {
 export function resolveDependencies(
   dependencies: V2AppDependencies,
 ): V2RuntimeDependencies {
+  const uploadPath =
+    dependencies.uploadPath ??
+    path.resolve(process.cwd(), "data", "v2", "uploads");
+  const maxUploadBytes =
+    dependencies.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
   return {
     ...dependencies,
+    uploadPath,
+    maxUploadBytes,
+    blobStore:
+      dependencies.blobStore ?? new BlobStore({ rootPath: uploadPath, maxUploadBytes }),
     trustProxyHops: dependencies.trustProxyHops ?? 0,
     clock: dependencies.clock ?? (() => new Date()),
     idGenerator: dependencies.idGenerator ?? randomUUID,

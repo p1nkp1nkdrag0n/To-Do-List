@@ -30,7 +30,14 @@ export interface ScheduleFixture {
   close(): void;
 }
 
-export function createScheduleFixture(): ScheduleFixture {
+export interface ScheduleFixtureOptions {
+  uploadPath?: string;
+  maxUploadBytes?: number;
+}
+
+export function createScheduleFixture(
+  options: ScheduleFixtureOptions = {},
+): ScheduleFixture {
   const database = openV2Database(":memory:");
   migrateV2Database(database, () => SCHEDULE_NOW.toISOString());
   const application = createV2App({
@@ -39,6 +46,8 @@ export function createScheduleFixture(): ScheduleFixture {
     sessionSecret: SESSION_SECRET,
     cookieSecure: false,
     clock: () => new Date(SCHEDULE_NOW),
+    uploadPath: options.uploadPath,
+    maxUploadBytes: options.maxUploadBytes,
     passwordHasher: async (password) => `test:${password}`,
     passwordVerifier: async (password, hash) => hash === `test:${password}`,
   });

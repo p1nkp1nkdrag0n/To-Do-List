@@ -5,6 +5,26 @@ import {
   type ScheduleFixture,
 } from "./schedule-fixture.js";
 
+function insertMarkdownResource(
+  fixture: ScheduleFixture,
+  input: { id: string; projectId: string; userId: string; title: string },
+): void {
+  const now = "2026-07-17T08:00:00.000Z";
+  fixture.database.run(
+    `INSERT INTO resources
+      (id, project_id, kind, title, current_version_number, created_by, updated_by, created_at, updated_at)
+     VALUES (?, ?, 'markdown', ?, 1, ?, ?, ?, ?)`,
+    [input.id, input.projectId, input.title, input.userId, input.userId, now, now],
+  );
+  fixture.database.run(
+    `INSERT INTO resource_versions
+      (id, resource_id, version_number, original_filename, byte_size, mime_type, sha256,
+       markdown_content, version_note, created_by, created_at)
+     VALUES (?, ?, 1, ?, 1, 'text/markdown', ?, '#', '', ?, ?)`,
+    [`${input.id}-version`, input.id, `${input.title}.md`, "a".repeat(64), input.userId, now],
+  );
+}
+
 describe("Task 3 review regressions", () => {
   let fixture: ScheduleFixture;
 
@@ -25,7 +45,11 @@ describe("Task 3 review regressions", () => {
     const dependency = (await leader.agent.post(`/api/projects/${project.id}/tasks/${child.id}/dependencies`).send({ predecessorTaskId: parent.id })).body.dependency as { id: string };
     const deliverable = (await leader.agent.post(`/api/projects/${project.id}/tasks/${child.id}/deliverables`).send({ title: "Child output" })).body.deliverable as { id: string };
 
-    const removed = await leader.agent.delete(`/api/projects/${project.id}/tasks/${parent.id}`).send({ expectedRevision: parent.revision });
+    const scheduleBeforeDelete = await leader.agent.get(`/api/projects/${project.id}/schedule`);
+    const removed = await leader.agent.delete(`/api/projects/${project.id}/tasks/${parent.id}`).send({
+      expectedRevision: parent.revision,
+      expectedScheduleRevision: scheduleBeforeDelete.body.revision,
+    });
     expect(removed.status).toBe(200);
     const schedule = await leader.agent.get(`/api/projects/${project.id}/schedule`);
     expect(schedule.body.tasks).toEqual([]);
@@ -62,7 +86,12 @@ describe("Task 3 review regressions", () => {
     const deliverable = (await leader.agent.post(`/api/projects/${project.id}/tasks/${task.id}/deliverables`).send({ title: "Report PDF" })).body.deliverable as { id: string; revision: number };
     await leader.agent.post(`/api/projects/${project.id}/participants/${participant.id}/progress`).send({ participantExpectedRevision: 1, completionPercent: 100, summary: "Ready", blockers: "", nextSteps: "Review" });
     const resourceId = "00000000-0000-4000-8000-000000000201";
-    fixture.database.run(`INSERT INTO resources (id, project_id, kind, title, created_by, updated_by, created_at, updated_at) VALUES (?, ?, 'markdown', 'Report', ?, ?, ?, ?)`, [resourceId, project.id, leader.id, leader.id, "2026-07-17T08:00:00.000Z", "2026-07-17T08:00:00.000Z"]);
+    insertMarkdownResource(fixture, {
+      id: resourceId,
+      projectId: project.id,
+      userId: leader.id,
+      title: "Report",
+    });
 
     const fulfilled = await leader.agent.post(`/api/projects/${project.id}/deliverables/${deliverable.id}/fulfill`).send({ expectedRevision: deliverable.revision, resourceId });
     expect(fulfilled.status).toBe(200);
@@ -279,11 +308,12 @@ describe("Task 3 review regressions", () => {
     const source = (await leader.agent.post(`/api/projects/${project.id}/tasks`).send({ title: "Weekly report" })).body.task as { id: string };
     const deliverable = (await leader.agent.post(`/api/projects/${project.id}/tasks/${source.id}/deliverables`).send({ title: "Report document" })).body.deliverable as { id: string; revision: number };
     const resourceId = "00000000-0000-4000-8000-000000000501";
-    fixture.database.run(
-      `INSERT INTO resources (id, project_id, kind, title, created_by, updated_by, created_at, updated_at)
-       VALUES (?, ?, 'markdown', 'Source report', ?, ?, ?, ?)`,
-      [resourceId, project.id, leader.id, leader.id, "2026-07-17T08:00:00.000Z", "2026-07-17T08:00:00.000Z"],
-    );
+    insertMarkdownResource(fixture, {
+      id: resourceId,
+      projectId: project.id,
+      userId: leader.id,
+      title: "Source report",
+    });
     await leader.agent.post(`/api/projects/${project.id}/deliverables/${deliverable.id}/fulfill`).send({
       expectedRevision: deliverable.revision,
       resourceId,
@@ -367,7 +397,11 @@ describe("Task 3 review regressions", () => {
       startsOn: "2026-07-20",
     })).body.rule as { id: string; revision: number };
     await leader.agent.delete(`/api/projects/${project.id}/recurring-rules/${rule.id}`).send({ expectedRevision: rule.revision });
-    await leader.agent.delete(`/api/projects/${project.id}/tasks/${source.id}`).send({ expectedRevision: source.revision });
+    const scheduleBeforeDelete = await leader.agent.get(`/api/projects/${project.id}/schedule`);
+    await leader.agent.delete(`/api/projects/${project.id}/tasks/${source.id}`).send({
+      expectedRevision: source.revision,
+      expectedScheduleRevision: scheduleBeforeDelete.body.revision,
+    });
 
     const reactivated = await leader.agent.patch(`/api/projects/${project.id}/recurring-rules/${rule.id}`).send({
       expectedRevision: 2,
@@ -405,7 +439,10 @@ describe("Task 3 review regressions", () => {
     const child = (await leader.agent.post(`/api/projects/${project.id}/tasks`).send({ title: "Source", parentId: parent.id })).body.task as { id: string };
     await leader.agent.post(`/api/projects/${project.id}/recurring-rules`).send({ sourceTaskId: child.id, frequency: "weekly", intervalCount: 1, dayOfWeek: 1, startsOn: "2026-07-20" });
     const before = (await leader.agent.get(`/api/projects/${project.id}/schedule`)).body.revision;
-    const deleted = await leader.agent.delete(`/api/projects/${project.id}/tasks/${parent.id}`).send({ expectedRevision: parent.revision });
+    const deleted = await leader.agent.delete(`/api/projects/${project.id}/tasks/${parent.id}`).send({
+      expectedRevision: parent.revision,
+      expectedScheduleRevision: before,
+    });
     expect(deleted.status).toBe(409);
     expect(deleted.body.error.code).toBe("TASK_RECURRING_SOURCE");
     expect((await leader.agent.get(`/api/projects/${project.id}/schedule`)).body.revision).toBe(before);
@@ -417,7 +454,12 @@ describe("Task 3 review regressions", () => {
     const milestone = (await leader.agent.post(`/api/projects/${project.id}/milestones`).send({ title: "Submission", dueDate: "2026-07-31", status: "in_progress" })).body.milestone as { id: string; revision: number };
     const deliverable = (await leader.agent.post(`/api/projects/${project.id}/milestones/${milestone.id}/deliverables`).send({ title: "Receipt" })).body.deliverable as { id: string; revision: number };
     const resourceId = "00000000-0000-4000-8000-000000000401";
-    fixture.database.run(`INSERT INTO resources (id, project_id, kind, title, created_by, updated_by, created_at, updated_at) VALUES (?, ?, 'markdown', 'Receipt', ?, ?, ?, ?)`, [resourceId, project.id, leader.id, leader.id, "2026-07-17T08:00:00.000Z", "2026-07-17T08:00:00.000Z"]);
+    insertMarkdownResource(fixture, {
+      id: resourceId,
+      projectId: project.id,
+      userId: leader.id,
+      title: "Receipt",
+    });
     const fulfilled = await leader.agent.post(`/api/projects/${project.id}/deliverables/${deliverable.id}/fulfill`).send({ expectedRevision: deliverable.revision, resourceId });
     const submitted = await leader.agent.post(`/api/projects/${project.id}/milestones/${milestone.id}/submit-review`).send({ expectedRevision: milestone.revision });
     expect(submitted.body.milestone).toMatchObject({ status: "pending_review", revision: 2 });

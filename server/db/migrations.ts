@@ -897,6 +897,221 @@ BEGIN
 END;
 `;
 
+const task5ResourcesLifecycleSchema = String.raw`
+ALTER TABLE deliverable_requirements
+  ADD COLUMN fulfilled_resource_version_id TEXT
+  REFERENCES resource_versions(id);
+
+ALTER TABLE resource_versions
+  ADD COLUMN restored_from_version_id TEXT
+  REFERENCES resource_versions(id);
+
+ALTER TABLE tasks ADD COLUMN archive_batch_id TEXT;
+ALTER TABLE tasks ADD COLUMN trash_batch_id TEXT;
+ALTER TABLE task_participants ADD COLUMN removed_batch_id TEXT;
+ALTER TABLE task_dependencies ADD COLUMN deleted_batch_id TEXT;
+ALTER TABLE projects ADD COLUMN trash_batch_id TEXT;
+ALTER TABLE resources ADD COLUMN trash_batch_id TEXT;
+
+UPDATE deliverable_requirements
+   SET fulfilled_resource_version_id = (
+     SELECT resource_versions.id
+       FROM resources
+       JOIN resource_versions
+         ON resource_versions.resource_id = resources.id
+        AND resource_versions.version_number = resources.current_version_number
+      WHERE resources.id = deliverable_requirements.fulfilled_resource_id
+        AND resources.project_id = deliverable_requirements.project_id
+   )
+ WHERE fulfilled_resource_id IS NOT NULL
+   AND EXISTS (
+     SELECT 1
+       FROM resources
+       JOIN resource_versions
+         ON resource_versions.resource_id = resources.id
+        AND resource_versions.version_number = resources.current_version_number
+      WHERE resources.id = deliverable_requirements.fulfilled_resource_id
+        AND resources.project_id = deliverable_requirements.project_id
+   );
+
+UPDATE deliverable_requirements
+   SET fulfilled_resource_id = NULL,
+       fulfilled_resource_version_id = NULL,
+       fulfilled_at = NULL,
+       fulfilled_by = NULL,
+       accepted_at = NULL,
+       accepted_by = NULL,
+       revision = revision + 1
+ WHERE fulfilled_resource_id IS NOT NULL
+   AND fulfilled_resource_version_id IS NULL;
+
+CREATE TABLE storage_gc_queue (
+  storage_key TEXT PRIMARY KEY
+    CHECK (
+      length(storage_key) = 64 AND
+      storage_key NOT GLOB '*[^0-9a-f]*'
+    ),
+  enqueued_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  last_attempt_at TEXT,
+  last_error TEXT
+);
+
+CREATE TABLE progress_purge_context (
+  participant_id TEXT PRIMARY KEY,
+  staged_at TEXT NOT NULL DEFAULT (
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  )
+) WITHOUT ROWID;
+
+CREATE UNIQUE INDEX idx_resource_versions_storage_key
+  ON resource_versions(storage_key)
+  WHERE storage_key IS NOT NULL;
+
+CREATE INDEX idx_projects_trash
+  ON projects(purge_after, deleted_at)
+  WHERE deleted_at IS NOT NULL;
+
+CREATE INDEX idx_tasks_trash
+  ON tasks(project_id, purge_after, deleted_at)
+  WHERE deleted_at IS NOT NULL;
+
+CREATE INDEX idx_resources_trash
+  ON resources(project_id, purge_after, deleted_at)
+  WHERE deleted_at IS NOT NULL;
+
+CREATE INDEX idx_storage_gc_queue_pending
+  ON storage_gc_queue(attempts, enqueued_at);
+
+CREATE TRIGGER resource_versions_validate_sha256_insert
+BEFORE INSERT ON resource_versions
+WHEN length(NEW.sha256) <> 64
+  OR NEW.sha256 GLOB '*[^0-9a-f]*'
+BEGIN
+  SELECT RAISE(ABORT, 'resource version SHA-256 must be 64 lowercase hex characters');
+END;
+
+CREATE TRIGGER resource_versions_validate_storage_key_insert
+BEFORE INSERT ON resource_versions
+WHEN NEW.storage_key IS NOT NULL
+ AND (
+   length(NEW.storage_key) <> 64 OR
+   NEW.storage_key GLOB '*[^0-9a-f]*'
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'resource version storage key must be 64 lowercase hex characters');
+END;
+
+CREATE TRIGGER resource_versions_match_parent_kind_insert
+BEFORE INSERT ON resource_versions
+WHEN NOT EXISTS (
+  SELECT 1
+    FROM resources
+   WHERE id = NEW.resource_id
+     AND (
+       (
+         kind = 'markdown' AND
+         NEW.markdown_content IS NOT NULL AND
+         NEW.storage_key IS NULL
+       ) OR (
+         kind = 'file' AND
+         NEW.markdown_content IS NULL AND
+         NEW.storage_key IS NOT NULL
+       )
+     )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'resource version payload must match its parent resource kind');
+END;
+
+CREATE TRIGGER resource_versions_require_next_version_insert
+BEFORE INSERT ON resource_versions
+WHEN NEW.version_number <> COALESCE(
+  (
+    SELECT MAX(version_number) + 1
+      FROM resource_versions
+     WHERE resource_id = NEW.resource_id
+  ),
+  1
+)
+BEGIN
+  SELECT RAISE(ABORT, 'resource version number must append the next version');
+END;
+
+CREATE TRIGGER resource_versions_validate_restore_source_insert
+BEFORE INSERT ON resource_versions
+WHEN NEW.restored_from_version_id IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1
+     FROM resource_versions
+    WHERE id = NEW.restored_from_version_id
+      AND resource_id = NEW.resource_id
+      AND version_number < NEW.version_number
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'restored resource version must reference an earlier version of the same resource');
+END;
+
+CREATE TRIGGER resource_versions_are_immutable_update
+BEFORE UPDATE ON resource_versions
+BEGIN
+  SELECT RAISE(ABORT, 'resource versions are immutable');
+END;
+
+CREATE TRIGGER resources_kind_is_immutable_update
+BEFORE UPDATE OF kind ON resources
+WHEN NEW.kind <> OLD.kind
+BEGIN
+  SELECT RAISE(ABORT, 'resource kind is immutable');
+END;
+
+CREATE TRIGGER resource_versions_queue_storage_delete
+AFTER DELETE ON resource_versions
+WHEN OLD.storage_key IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO storage_gc_queue
+    (storage_key, enqueued_at, attempts)
+  VALUES (
+    OLD.storage_key,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    0
+  );
+END;
+
+DROP TRIGGER before_delete_resource_clear_optional_references;
+
+CREATE TRIGGER before_delete_resource_clear_optional_references
+BEFORE DELETE ON resources
+FOR EACH ROW
+BEGIN
+  UPDATE deliverable_requirements
+     SET fulfilled_resource_id = NULL,
+         fulfilled_resource_version_id = NULL,
+         fulfilled_at = NULL,
+         fulfilled_by = NULL,
+         accepted_at = NULL,
+         accepted_by = NULL,
+         revision = revision + 1
+   WHERE fulfilled_resource_id = OLD.id
+      OR fulfilled_resource_version_id IN (
+        SELECT id FROM resource_versions WHERE resource_id = OLD.id
+      );
+END;
+
+DROP TRIGGER progress_updates_are_immutable_delete;
+
+CREATE TRIGGER progress_updates_are_immutable_delete
+BEFORE DELETE ON progress_updates
+WHEN NOT EXISTS (
+  SELECT 1
+    FROM progress_purge_context
+   WHERE participant_id = OLD.participant_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'progress updates are immutable');
+END;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -921,6 +1136,12 @@ export const MIGRATIONS: readonly Migration[] = [
     name: "task4_availability_conflicts",
     sql: task4AvailabilitySchema,
     checksum: migrationChecksum(task4AvailabilitySchema),
+  },
+  {
+    version: 5,
+    name: "task5_resources_lifecycle",
+    sql: task5ResourcesLifecycleSchema,
+    checksum: migrationChecksum(task5ResourcesLifecycleSchema),
   },
 ];
 

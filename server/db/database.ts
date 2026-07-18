@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  backup,
   DatabaseSync,
   type SQLInputValue,
   type SQLOutputValue,
@@ -132,6 +133,10 @@ export class V2Database {
     } finally {
       this.#transactionActive = false;
     }
+  }
+
+  async backupTo(destinationPath: string): Promise<void> {
+    await backup(this.#database, destinationPath);
   }
 
   close(): void {

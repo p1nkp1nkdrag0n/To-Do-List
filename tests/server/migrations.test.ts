@@ -25,6 +25,8 @@ const task2MigrationChecksum =
   "b10f182275922760cf52d052fae18c05b6534dc53de1cc4a4b8f7106bfa67c5c";
 const task3MigrationChecksum =
   "878c2980a4c033c11fc63ed7bed1a56c16ed14cd2e041961ad555d7fb5a04878";
+const task4MigrationChecksum =
+  "49023c08c70123d416d836bc55893fe6fa9d100cfb68dd182ef602eb9efc02c8";
 
 const requiredTables = [
   "activity_log",
@@ -35,6 +37,7 @@ const requiredTables = [
   "deliverable_requirements",
   "milestones",
   "phases",
+  "progress_purge_context",
   "progress_updates",
   "registration_hash_reservations",
   "project_invites",
@@ -48,6 +51,7 @@ const requiredTables = [
   "resources",
   "schema_migrations",
   "sessions",
+  "storage_gc_queue",
   "task_dependencies",
   "task_participants",
   "tasks",
@@ -68,6 +72,30 @@ function migratedDatabase(): V2Database {
   const database = openV2Database(":memory:");
   databases.push(database);
   migrateV2Database(database);
+  return database;
+}
+
+function databaseAtMigrationVersion(version: number): V2Database {
+  const database = openV2Database(":memory:");
+  databases.push(database);
+  database.exec(`
+    CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY CHECK (version >= 1),
+      name TEXT NOT NULL UNIQUE,
+      checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+      applied_at TEXT NOT NULL
+    )
+  `);
+
+  for (const migration of MIGRATIONS.slice(0, version)) {
+    database.exec(migration.sql);
+    database.run(
+      `INSERT INTO schema_migrations (version, name, checksum, applied_at)
+       VALUES (?, ?, ?, ?)`,
+      [migration.version, migration.name, migration.checksum, timestamp],
+    );
+  }
+
   return database;
 }
 
@@ -215,18 +243,20 @@ function insertResource(
     userId: string;
     phaseId?: string | null;
     sourceTaskId?: string | null;
+    kind?: "markdown" | "file";
   },
 ): void {
   database.run(
     `INSERT INTO resources
        (id, project_id, phase_id, source_task_id, kind, title,
         created_by, updated_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'markdown', 'Notes', ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, 'Notes', ?, ?, ?, ?)`,
     [
       values.id,
       values.projectId,
       values.phaseId ?? null,
       values.sourceTaskId ?? null,
+      values.kind ?? "markdown",
       values.userId,
       values.userId,
       timestamp,
@@ -235,10 +265,43 @@ function insertResource(
   );
 }
 
+function insertResourceVersion(
+  database: V2Database,
+  values: {
+    id: string;
+    resourceId: string;
+    userId: string;
+    versionNumber: number;
+    sha256?: string;
+    markdownContent?: string | null;
+    storageKey?: string | null;
+    restoredFromVersionId?: string | null;
+  },
+): void {
+  database.run(
+    `INSERT INTO resource_versions
+       (id, resource_id, version_number, original_filename, byte_size,
+        mime_type, sha256, markdown_content, storage_key, version_note,
+        created_by, created_at, restored_from_version_id)
+     VALUES (?, ?, ?, 'artifact.bin', 1, 'application/octet-stream', ?, ?, ?, '', ?, ?, ?)`,
+    [
+      values.id,
+      values.resourceId,
+      values.versionNumber,
+      values.sha256 ?? "a".repeat(64),
+      values.markdownContent ?? null,
+      values.storageKey ?? null,
+      values.userId,
+      timestamp,
+      values.restoredFromVersionId ?? null,
+    ],
+  );
+}
+
 describe("v2 schema migrations", () => {
-  it("keeps migrations 1 through 3 immutable while adding availability as migration 4", () => {
+  it("keeps migrations 1 through 4 immutable while adding resources lifecycle as migration 5", () => {
     expect(
-      MIGRATIONS.slice(0, 3).map(({ version, checksum }) => ({
+      MIGRATIONS.slice(0, 4).map(({ version, checksum }) => ({
         version,
         checksum,
       })),
@@ -246,9 +309,13 @@ describe("v2 schema migrations", () => {
       { version: 1, checksum: task1MigrationChecksum },
       { version: 2, checksum: task2MigrationChecksum },
       { version: 3, checksum: task3MigrationChecksum },
+      { version: 4, checksum: task4MigrationChecksum },
     ]);
-    expect(MIGRATIONS.at(-1)?.version).toBe(4);
-    expect(CURRENT_SCHEMA_VERSION).toBe(4);
+    expect(MIGRATIONS.at(-1)).toMatchObject({
+      version: 5,
+      name: "task5_resources_lifecycle",
+    });
+    expect(CURRENT_SCHEMA_VERSION).toBe(5);
   });
 
   it("adds an independent availability document revision in migration 4", () => {
@@ -296,7 +363,13 @@ describe("v2 schema migrations", () => {
       database.all<{ version: number }>(
         "SELECT version FROM schema_migrations ORDER BY version",
       ),
-    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
+    ).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+      { version: 5 },
+    ]);
   });
 
   it("enforces availability capacity and exception dates in migration 4", () => {
@@ -375,7 +448,13 @@ describe("v2 schema migrations", () => {
       database.all<{ version: number }>(
         "SELECT version FROM schema_migrations ORDER BY version",
       ),
-    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
+    ).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+      { version: 5 },
+    ]);
     expect(
       database
         .all<{ name: string }>("PRAGMA table_info(projects)")
@@ -1509,5 +1588,683 @@ describe("v2 schema migrations", () => {
         ]),
       );
     }
+  });
+
+  it("upgrades version 4, pins current deliverable versions, and normalizes zero-version fulfillment", () => {
+    const database = databaseAtMigrationVersion(4);
+    const { projectId, taskId, userId } = seedProject(database);
+    const versionedResourceId = "00000000-0000-4000-8000-000000000101";
+    const emptyResourceId = "00000000-0000-4000-8000-000000000102";
+    const currentVersionId = "00000000-0000-4000-8000-000000000103";
+    const pinnedDeliverableId = "00000000-0000-4000-8000-000000000104";
+    const normalizedDeliverableId = "00000000-0000-4000-8000-000000000105";
+
+    insertResource(database, {
+      id: versionedResourceId,
+      projectId,
+      userId,
+    });
+    insertResource(database, {
+      id: emptyResourceId,
+      projectId,
+      userId,
+    });
+    database.run(
+      `INSERT INTO resource_versions
+         (id, resource_id, version_number, original_filename, byte_size,
+          mime_type, sha256, markdown_content, created_by, created_at)
+       VALUES (?, ?, 1, 'notes.md', 5, 'text/markdown', ?, '# v1', ?, ?)`,
+      [currentVersionId, versionedResourceId, "a".repeat(64), userId, timestamp],
+    );
+    database.run(
+      "UPDATE resources SET current_version_number = 1 WHERE id = ?",
+      [versionedResourceId],
+    );
+
+    for (const [id, resourceId] of [
+      [pinnedDeliverableId, versionedResourceId],
+      [normalizedDeliverableId, emptyResourceId],
+    ] as const) {
+      database.run(
+        `INSERT INTO deliverable_requirements
+           (id, project_id, task_id, title, fulfilled_resource_id,
+            fulfilled_at, fulfilled_by, accepted_at, accepted_by,
+            created_by, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'Required artifact', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          projectId,
+          taskId,
+          resourceId,
+          timestamp,
+          userId,
+          timestamp,
+          userId,
+          userId,
+          userId,
+          timestamp,
+          timestamp,
+        ],
+      );
+    }
+
+    migrateV2Database(database, () => timestamp);
+
+    expect(
+      database.get<{
+        fulfilled_resource_id: string;
+        fulfilled_resource_version_id: string;
+        accepted_at: string;
+        revision: number;
+      }>(
+        `SELECT fulfilled_resource_id, fulfilled_resource_version_id,
+                accepted_at, revision
+           FROM deliverable_requirements WHERE id = ?`,
+        [pinnedDeliverableId],
+      ),
+    ).toEqual({
+      fulfilled_resource_id: versionedResourceId,
+      fulfilled_resource_version_id: currentVersionId,
+      accepted_at: timestamp,
+      revision: 1,
+    });
+    expect(
+      database.get<{
+        fulfilled_resource_id: string | null;
+        fulfilled_resource_version_id: string | null;
+        fulfilled_at: string | null;
+        fulfilled_by: string | null;
+        accepted_at: string | null;
+        accepted_by: string | null;
+        revision: number;
+      }>(
+        `SELECT fulfilled_resource_id, fulfilled_resource_version_id,
+                fulfilled_at, fulfilled_by, accepted_at, accepted_by, revision
+           FROM deliverable_requirements WHERE id = ?`,
+        [normalizedDeliverableId],
+      ),
+    ).toEqual({
+      fulfilled_resource_id: null,
+      fulfilled_resource_version_id: null,
+      fulfilled_at: null,
+      fulfilled_by: null,
+      accepted_at: null,
+      accepted_by: null,
+      revision: 2,
+    });
+    expect(
+      database
+        .all<{ from: string; table: string }>(
+          "PRAGMA foreign_key_list(deliverable_requirements)",
+        )
+        .map(({ from, table }) => ({ from, table })),
+    ).toContainEqual({
+      from: "fulfilled_resource_version_id",
+      table: "resource_versions",
+    });
+    expect(
+      database.get<{ version: number }>(
+        "SELECT MAX(version) AS version FROM schema_migrations",
+      ),
+    ).toEqual({ version: 5 });
+  });
+
+  it("enforces append-only resource versions, lowercase hashes, kind payloads, and immutable resource kinds", () => {
+    const database = migratedDatabase();
+    const { projectId, userId } = seedProject(database);
+    const markdownResourceId = "00000000-0000-4000-8000-000000000110";
+    const fileResourceId = "00000000-0000-4000-8000-000000000111";
+    const secondFileResourceId = "00000000-0000-4000-8000-000000000112";
+    const invalidHashResourceId = "00000000-0000-4000-8000-000000000113";
+    const firstVersionId = "00000000-0000-4000-8000-000000000114";
+    const storageKey = "b".repeat(64);
+
+    insertResource(database, {
+      id: markdownResourceId,
+      projectId,
+      userId,
+    });
+    insertResource(database, {
+      id: fileResourceId,
+      projectId,
+      userId,
+      kind: "file",
+    });
+    insertResource(database, {
+      id: secondFileResourceId,
+      projectId,
+      userId,
+      kind: "file",
+    });
+    insertResource(database, {
+      id: invalidHashResourceId,
+      projectId,
+      userId,
+    });
+
+    database.run(
+      "UPDATE resources SET current_version_number = 1 WHERE id = ?",
+      [markdownResourceId],
+    );
+    insertResourceVersion(database, {
+      id: firstVersionId,
+      resourceId: markdownResourceId,
+      userId,
+      versionNumber: 1,
+      markdownContent: "# version 1",
+    });
+    expect(
+      database.get<{ current_version_number: number; revision: number }>(
+        "SELECT current_version_number, revision FROM resources WHERE id = ?",
+        [markdownResourceId],
+      ),
+    ).toEqual({ current_version_number: 1, revision: 1 });
+    expect(() =>
+      insertResourceVersion(database, {
+        id: crypto.randomUUID(),
+        resourceId: markdownResourceId,
+        userId,
+        versionNumber: 3,
+        markdownContent: "# skipped",
+      }),
+    ).toThrow(/append|next version/i);
+    insertResourceVersion(database, {
+      id: crypto.randomUUID(),
+      resourceId: markdownResourceId,
+      userId,
+      versionNumber: 2,
+      markdownContent: "# restored",
+      restoredFromVersionId: firstVersionId,
+    });
+    expect(() =>
+      database.run(
+        "UPDATE resource_versions SET version_note = 'changed' WHERE id = ?",
+        [firstVersionId],
+      ),
+    ).toThrow(/resource versions are immutable/i);
+
+    expect(() =>
+      insertResourceVersion(database, {
+        id: crypto.randomUUID(),
+        resourceId: invalidHashResourceId,
+        userId,
+        versionNumber: 1,
+        sha256: "A".repeat(64),
+        markdownContent: "invalid hash",
+      }),
+    ).toThrow(/sha-?256|lowercase hex/i);
+    expect(() =>
+      insertResourceVersion(database, {
+        id: crypto.randomUUID(),
+        resourceId: fileResourceId,
+        userId,
+        versionNumber: 1,
+        markdownContent: "wrong payload",
+      }),
+    ).toThrow(/payload.*kind|file.*storage/i);
+    expect(() =>
+      insertResourceVersion(database, {
+        id: crypto.randomUUID(),
+        resourceId: fileResourceId,
+        userId,
+        versionNumber: 1,
+        storageKey: "Z".repeat(64),
+      }),
+    ).toThrow(/storage key|lowercase hex/i);
+
+    insertResourceVersion(database, {
+      id: crypto.randomUUID(),
+      resourceId: fileResourceId,
+      userId,
+      versionNumber: 1,
+      storageKey,
+    });
+    expect(() =>
+      insertResourceVersion(database, {
+        id: crypto.randomUUID(),
+        resourceId: secondFileResourceId,
+        userId,
+        versionNumber: 1,
+        storageKey,
+      }),
+    ).toThrow(/UNIQUE/i);
+    expect(() =>
+      database.run("UPDATE resources SET kind = 'file' WHERE id = ?", [
+        markdownResourceId,
+      ]),
+    ).toThrow(/resource kind is immutable/i);
+  });
+
+  it("clears complete deliverable acceptance state and queues file storage when a resource is deleted", () => {
+    const database = migratedDatabase();
+    const { projectId, taskId, userId } = seedProject(database);
+    const resourceId = "00000000-0000-4000-8000-000000000120";
+    const versionId = "00000000-0000-4000-8000-000000000121";
+    const deliverableId = "00000000-0000-4000-8000-000000000122";
+    const storageKey = "c".repeat(64);
+
+    insertResource(database, {
+      id: resourceId,
+      projectId,
+      userId,
+      kind: "file",
+    });
+    insertResourceVersion(database, {
+      id: versionId,
+      resourceId,
+      userId,
+      versionNumber: 1,
+      storageKey,
+    });
+    database.run(
+      `INSERT INTO deliverable_requirements
+         (id, project_id, task_id, title, fulfilled_resource_id,
+          fulfilled_resource_version_id, fulfilled_at, fulfilled_by,
+          accepted_at, accepted_by, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, 'Artifact', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        deliverableId,
+        projectId,
+        taskId,
+        resourceId,
+        versionId,
+        timestamp,
+        userId,
+        timestamp,
+        userId,
+        userId,
+        userId,
+        timestamp,
+        timestamp,
+      ],
+    );
+
+    database.run("DELETE FROM resources WHERE id = ?", [resourceId]);
+
+    expect(
+      database.get<{
+        fulfilled_resource_id: string | null;
+        fulfilled_resource_version_id: string | null;
+        fulfilled_at: string | null;
+        fulfilled_by: string | null;
+        accepted_at: string | null;
+        accepted_by: string | null;
+        revision: number;
+      }>(
+        `SELECT fulfilled_resource_id, fulfilled_resource_version_id,
+                fulfilled_at, fulfilled_by, accepted_at, accepted_by, revision
+           FROM deliverable_requirements WHERE id = ?`,
+        [deliverableId],
+      ),
+    ).toEqual({
+      fulfilled_resource_id: null,
+      fulfilled_resource_version_id: null,
+      fulfilled_at: null,
+      fulfilled_by: null,
+      accepted_at: null,
+      accepted_by: null,
+      revision: 2,
+    });
+    expect(
+      database.get<{ storage_key: string }>(
+        "SELECT storage_key FROM storage_gc_queue WHERE storage_key = ?",
+        [storageKey],
+      ),
+    ).toEqual({ storage_key: storageKey });
+  });
+
+  it("adds lifecycle batch metadata and indexed trash queues", () => {
+    const database = migratedDatabase();
+    const expectedColumns: Record<string, string[]> = {
+      projects: ["trash_batch_id"],
+      tasks: ["archive_batch_id", "trash_batch_id"],
+      task_participants: ["removed_batch_id"],
+      task_dependencies: ["deleted_batch_id"],
+      resources: ["trash_batch_id"],
+      resource_versions: ["restored_from_version_id"],
+    };
+
+    for (const [table, requiredColumnsForTable] of Object.entries(
+      expectedColumns,
+    )) {
+      const columns = database
+        .all<{ name: string }>(`PRAGMA table_info(${table})`)
+        .map(({ name }) => name);
+      expect(columns, table).toEqual(
+        expect.arrayContaining(requiredColumnsForTable),
+      );
+    }
+
+    expect(
+      database.get<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM sqlite_schema
+          WHERE type = 'table' AND name = 'storage_gc_queue'`,
+      ),
+    ).toEqual({ count: 1 });
+    expect(
+      database
+        .all<{ name: string }>(
+          `SELECT name FROM sqlite_schema
+            WHERE type = 'index' AND name LIKE 'idx_%_trash'`,
+        )
+        .map(({ name }) => name),
+    ).toEqual(
+      expect.arrayContaining([
+        "idx_projects_trash",
+        "idx_tasks_trash",
+        "idx_resources_trash",
+      ]),
+    );
+  });
+
+  it("requires an exact purge context even when progress belongs to tombstoned work", () => {
+    const taskDatabase = migratedDatabase();
+    const taskSeed = seedProject(taskDatabase);
+    const taskParticipantId = "00000000-0000-4000-8000-000000000130";
+    const taskProgressId = "00000000-0000-4000-8000-000000000131";
+    const unrelatedParticipantId = "00000000-0000-4000-8000-000000000132";
+    const unrelatedProgressId = "00000000-0000-4000-8000-000000000133";
+    const unrelatedTaskId = "00000000-0000-4000-8000-000000000140";
+    insertTask(taskDatabase, {
+      id: unrelatedTaskId,
+      projectId: taskSeed.projectId,
+      userId: taskSeed.userId,
+    });
+    taskDatabase.run(
+      `INSERT INTO task_participants
+         (id, project_id, task_id, user_id, start_date, end_date,
+          estimated_minutes, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 60, ?, ?, ?, ?)`,
+      [
+        taskParticipantId,
+        taskSeed.projectId,
+        taskSeed.taskId,
+        taskSeed.userId,
+        taskSeed.userId,
+        taskSeed.userId,
+        timestamp,
+        timestamp,
+      ],
+    );
+    taskDatabase.run(
+      `INSERT INTO progress_updates
+         (id, participant_id, completion_percent, summary, created_by, created_at)
+       VALUES (?, ?, 20, 'Started', ?, ?)`,
+      [taskProgressId, taskParticipantId, taskSeed.userId, timestamp],
+    );
+    taskDatabase.run(
+      `INSERT INTO task_participants
+         (id, project_id, task_id, user_id, start_date, end_date,
+          estimated_minutes, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 60, ?, ?, ?, ?)`,
+      [
+        unrelatedParticipantId,
+        taskSeed.projectId,
+        unrelatedTaskId,
+        taskSeed.userId,
+        taskSeed.userId,
+        taskSeed.userId,
+        timestamp,
+        timestamp,
+      ],
+    );
+    taskDatabase.run(
+      `INSERT INTO progress_updates
+         (id, participant_id, completion_percent, summary, created_by, created_at)
+       VALUES (?, ?, 30, 'Unrelated', ?, ?)`,
+      [unrelatedProgressId, unrelatedParticipantId, taskSeed.userId, timestamp],
+    );
+
+    expect(() =>
+      taskDatabase.run("DELETE FROM progress_updates WHERE id = ?", [
+        taskProgressId,
+      ]),
+    ).toThrow(/progress updates are immutable/i);
+
+    taskDatabase.run(
+      `UPDATE task_participants
+          SET removed_at = ?, removed_by = ?, removed_batch_id = ?
+        WHERE id = ?`,
+      [timestamp, taskSeed.userId, "task-trash-batch", taskParticipantId],
+    );
+    taskDatabase.run(
+      `UPDATE tasks
+          SET deleted_at = ?, deleted_by = ?, purge_after = ?, trash_batch_id = ?
+        WHERE id = ?`,
+      [
+        timestamp,
+        taskSeed.userId,
+        "2026-08-17T08:30:00.000Z",
+        "task-trash-batch",
+        taskSeed.taskId,
+      ],
+    );
+
+    expect(() =>
+      taskDatabase.run("DELETE FROM progress_updates WHERE id = ?", [
+        taskProgressId,
+      ]),
+    ).toThrow(/progress updates are immutable/i);
+
+    taskDatabase.run(
+      `INSERT INTO progress_purge_context (participant_id)
+       VALUES (?)`,
+      [taskParticipantId],
+    );
+    expect(() =>
+      taskDatabase.run("DELETE FROM progress_updates WHERE id = ?", [
+        unrelatedProgressId,
+      ]),
+    ).toThrow(/progress updates are immutable/i);
+
+    taskDatabase.run(
+      "DELETE FROM progress_purge_context WHERE participant_id = ?",
+      [taskParticipantId],
+    );
+    expect(
+      taskDatabase.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM progress_purge_context",
+      ),
+    ).toEqual({ count: 0 });
+    expect(() =>
+      taskDatabase.run("DELETE FROM progress_updates WHERE id = ?", [
+        taskProgressId,
+      ]),
+    ).toThrow(/progress updates are immutable/i);
+  });
+
+  it("allows a task cascade only after every affected participant is staged", () => {
+    const taskDatabase = migratedDatabase();
+    const taskSeed = seedProject(taskDatabase);
+    const firstParticipantId = "00000000-0000-4000-8000-000000000134";
+    const firstProgressId = "00000000-0000-4000-8000-000000000135";
+    const secondParticipantId = "00000000-0000-4000-8000-000000000136";
+    const secondProgressId = "00000000-0000-4000-8000-000000000137";
+    const childTaskId = "00000000-0000-4000-8000-000000000141";
+    insertTask(taskDatabase, {
+      id: childTaskId,
+      projectId: taskSeed.projectId,
+      userId: taskSeed.userId,
+      parentId: taskSeed.taskId,
+    });
+
+    for (const [participantId, progressId, taskId] of [
+      [firstParticipantId, firstProgressId, taskSeed.taskId],
+      [secondParticipantId, secondProgressId, childTaskId],
+    ]) {
+      taskDatabase.run(
+        `INSERT INTO task_participants
+           (id, project_id, task_id, user_id, start_date, end_date,
+            estimated_minutes, created_by, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 60, ?, ?, ?, ?)`,
+        [
+          participantId,
+          taskSeed.projectId,
+          taskId,
+          taskSeed.userId,
+          taskSeed.userId,
+          taskSeed.userId,
+          timestamp,
+          timestamp,
+        ],
+      );
+      taskDatabase.run(
+        `INSERT INTO progress_updates
+           (id, participant_id, completion_percent, summary, created_by, created_at)
+         VALUES (?, ?, 20, 'Started', ?, ?)`,
+        [progressId, participantId, taskSeed.userId, timestamp],
+      );
+    }
+
+    taskDatabase.run(
+      `UPDATE task_participants
+          SET removed_at = ?, removed_by = ?, removed_batch_id = ?
+        WHERE task_id IN (?, ?)`,
+      [
+        timestamp,
+        taskSeed.userId,
+        "task-trash-batch",
+        taskSeed.taskId,
+        childTaskId,
+      ],
+    );
+    taskDatabase.run(
+      `UPDATE tasks
+          SET deleted_at = ?, deleted_by = ?, purge_after = ?, trash_batch_id = ?
+        WHERE id IN (?, ?)`,
+      [
+        timestamp,
+        taskSeed.userId,
+        "2026-08-17T08:30:00.000Z",
+        "task-trash-batch",
+        taskSeed.taskId,
+        childTaskId,
+      ],
+    );
+
+    expect(() =>
+      taskDatabase.run("DELETE FROM tasks WHERE id = ?", [taskSeed.taskId]),
+    ).toThrow(/progress updates are immutable/i);
+
+    taskDatabase.run(
+      "INSERT INTO progress_purge_context (participant_id) VALUES (?)",
+      [firstParticipantId],
+    );
+    expect(() =>
+      taskDatabase.run("DELETE FROM tasks WHERE id = ?", [taskSeed.taskId]),
+    ).toThrow(/progress updates are immutable/i);
+
+    taskDatabase.run(
+      "INSERT INTO progress_purge_context (participant_id) VALUES (?)",
+      [secondParticipantId],
+    );
+    expect(() =>
+      taskDatabase.run("DELETE FROM tasks WHERE id = ?", [taskSeed.taskId]),
+    ).not.toThrow();
+    expect(
+      taskDatabase.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM progress_updates WHERE id = ?",
+        [firstProgressId],
+      ),
+    ).toEqual({ count: 0 });
+    expect(
+      taskDatabase.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM progress_updates WHERE id = ?",
+        [secondProgressId],
+      ),
+    ).toEqual({ count: 0 });
+
+    taskDatabase.run("DELETE FROM progress_purge_context");
+    expect(
+      taskDatabase.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM progress_purge_context",
+      ),
+    ).toEqual({ count: 0 });
+  });
+
+  it("allows a project cascade only after its participant is staged", () => {
+    const projectDatabase = migratedDatabase();
+    const projectSeed = seedProject(projectDatabase);
+    const projectParticipantId = "00000000-0000-4000-8000-000000000138";
+    const projectProgressId = "00000000-0000-4000-8000-000000000139";
+    projectDatabase.run(
+      `INSERT INTO task_participants
+         (id, project_id, task_id, user_id, start_date, end_date,
+          estimated_minutes, created_by, updated_by, created_at, updated_at,
+          removed_at, removed_by, removed_batch_id)
+       VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 60, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        projectParticipantId,
+        projectSeed.projectId,
+        projectSeed.taskId,
+        projectSeed.userId,
+        projectSeed.userId,
+        projectSeed.userId,
+        timestamp,
+        timestamp,
+        timestamp,
+        projectSeed.userId,
+        "project-trash-batch",
+      ],
+    );
+    projectDatabase.run(
+      `INSERT INTO progress_updates
+         (id, participant_id, completion_percent, summary, created_by, created_at)
+       VALUES (?, ?, 50, 'Halfway', ?, ?)`,
+      [projectProgressId, projectParticipantId, projectSeed.userId, timestamp],
+    );
+    projectDatabase.run(
+      `UPDATE tasks
+          SET deleted_at = ?, deleted_by = ?, purge_after = ?, trash_batch_id = ?
+        WHERE id = ?`,
+      [
+        timestamp,
+        projectSeed.userId,
+        "2026-08-17T08:30:00.000Z",
+        "project-trash-batch",
+        projectSeed.taskId,
+      ],
+    );
+    projectDatabase.run(
+      `UPDATE projects
+          SET deleted_at = ?, deleted_by = ?, purge_after = ?, trash_batch_id = ?
+        WHERE id = ?`,
+      [
+        timestamp,
+        projectSeed.userId,
+        "2026-08-17T08:30:00.000Z",
+        "project-trash-batch",
+        projectSeed.projectId,
+      ],
+    );
+
+    expect(() =>
+      projectDatabase.run("DELETE FROM projects WHERE id = ?", [
+        projectSeed.projectId,
+      ]),
+    ).toThrow(/progress updates are immutable/i);
+
+    projectDatabase.run(
+      "INSERT INTO progress_purge_context (participant_id) VALUES (?)",
+      [projectParticipantId],
+    );
+    expect(() =>
+      projectDatabase.run("DELETE FROM projects WHERE id = ?", [
+        projectSeed.projectId,
+      ]),
+    ).not.toThrow();
+    expect(
+      projectDatabase.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM progress_updates WHERE id = ?",
+        [projectProgressId],
+      ),
+    ).toEqual({ count: 0 });
+
+    projectDatabase.run("DELETE FROM progress_purge_context");
+    expect(
+      projectDatabase.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM progress_purge_context",
+      ),
+    ).toEqual({ count: 0 });
   });
 });

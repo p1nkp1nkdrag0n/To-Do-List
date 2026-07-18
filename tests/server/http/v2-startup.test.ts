@@ -138,6 +138,29 @@ describe("v2 standalone server", () => {
     ).toEqual({ count: MIGRATIONS.length });
   });
 
+  it("holds the deployment lock for the complete server lifetime", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "v2-server-lock-"));
+    directories.push(directory);
+    const config = parseConfig(
+      {
+        NODE_ENV: "test",
+        DB_PATH: "runtime/v2.sqlite",
+        UPLOAD_PATH: "runtime/uploads",
+        HOST: "127.0.0.1",
+        PORT: "0",
+      },
+      directory,
+    );
+
+    const first = await startV2Server(config);
+    await expect(startV2Server(config)).rejects.toThrow(/locked by live process/i);
+    await first.close();
+
+    const restarted = await startV2Server(config);
+    handles.push(restarted);
+    expect((await fetch(`${restarted.url}/healthz`)).status).toBe(200);
+  });
+
   it("purges stale authentication and invite attempts during startup", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "v2-startup-purge-"));
     directories.push(directory);

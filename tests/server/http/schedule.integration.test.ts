@@ -362,15 +362,23 @@ describe("v2 schedule phase and task API", () => {
     const resourceId = "00000000-0000-4000-8000-000000000099";
     fixture.database.run(
       `INSERT INTO resources
-        (id, project_id, kind, title, created_by, updated_by, created_at, updated_at)
-       VALUES (?, ?, 'markdown', 'Final report', ?, ?, ?, ?)`,
+        (id, project_id, kind, title, current_version_number, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, 'markdown', 'Final report', 1, ?, ?, ?, ?)`,
       [resourceId, project.id, leader.id, leader.id, now, now],
+    );
+    const resourceVersionId = "00000000-0000-4000-8000-000000000098";
+    fixture.database.run(
+      `INSERT INTO resource_versions
+        (id, resource_id, version_number, original_filename, byte_size, mime_type, sha256,
+         markdown_content, version_note, created_by, created_at)
+       VALUES (?, ?, 1, 'Final report.md', 1, 'text/markdown', ?, '#', '', ?, ?)`,
+      [resourceVersionId, resourceId, "a".repeat(64), leader.id, now],
     );
     fixture.database.run(
       `UPDATE deliverable_requirements
-          SET fulfilled_resource_id = ?, fulfilled_at = ?, fulfilled_by = ?
+          SET fulfilled_resource_id = ?, fulfilled_resource_version_id = ?, fulfilled_at = ?, fulfilled_by = ?
         WHERE id = ?`,
-      [resourceId, now, leader.id, deliverable.id],
+      [resourceId, resourceVersionId, now, leader.id, deliverable.id],
     );
 
     const reviewed = await leader.agent

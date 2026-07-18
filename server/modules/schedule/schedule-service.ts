@@ -141,6 +141,7 @@ interface DeliverableRow extends Record<string, unknown> {
   title: string;
   description: string;
   fulfilled_resource_id: string | null;
+  fulfilled_resource_version_id: string | null;
   fulfilled_at: string | null;
   fulfilled_by: string | null;
   accepted_at: string | null;
@@ -278,6 +279,7 @@ export interface DeliverableEntity {
   title: string;
   description: string;
   fulfilledResourceId: string | null;
+  fulfilledResourceVersionId: string | null;
   fulfilledAt: string | null;
   fulfilledBy: string | null;
   acceptedAt: string | null;
@@ -428,6 +430,7 @@ function toDeliverable(row: DeliverableRow): DeliverableEntity {
     title: row.title,
     description: row.description,
     fulfilledResourceId: row.fulfilled_resource_id,
+    fulfilledResourceVersionId: row.fulfilled_resource_version_id,
     fulfilledAt: row.fulfilled_at,
     fulfilledBy: row.fulfilled_by,
     acceptedAt: row.accepted_at,
@@ -1277,18 +1280,24 @@ export class ScheduleService {
       const deliverable = this.requireDeliverable(projectId, deliverableId);
       this.assertRevision("deliverable", deliverable, input.expectedRevision, toDeliverable);
       this.assertDeliverableOwnerEditable(projectId, deliverable);
-      const resource = this.dependencies.database.get<{ id: string }>(
-        "SELECT id FROM resources WHERE id=? AND project_id=? AND archived_at IS NULL AND deleted_at IS NULL",
+      const resource = this.dependencies.database.get<{ id: string; version_id: string }>(
+        `SELECT resources.id, resource_versions.id AS version_id
+           FROM resources
+           JOIN resource_versions
+             ON resource_versions.resource_id=resources.id
+            AND resource_versions.version_number=resources.current_version_number
+          WHERE resources.id=? AND resources.project_id=?
+            AND resources.archived_at IS NULL AND resources.deleted_at IS NULL`,
         [input.resourceId, projectId],
       );
-      if (resource === undefined) throw new HttpError(404, "RESOURCE_NOT_FOUND", "The active project resource was not found.");
+      if (resource === undefined) throw new HttpError(404, "RESOURCE_NOT_FOUND", "The active versioned project resource was not found.");
       const now = this.dependencies.clock().toISOString();
       const changed = this.dependencies.database.run(
         `UPDATE deliverable_requirements
-            SET fulfilled_resource_id=?, fulfilled_at=?, fulfilled_by=?, accepted_at=NULL, accepted_by=NULL,
+            SET fulfilled_resource_id=?, fulfilled_resource_version_id=?, fulfilled_at=?, fulfilled_by=?, accepted_at=NULL, accepted_by=NULL,
                 updated_by=?, updated_at=?, revision=revision+1
           WHERE id=? AND project_id=? AND revision=?`,
-        [input.resourceId, now, auth.user.id, auth.user.id, now, deliverableId, projectId, input.expectedRevision],
+        [input.resourceId, resource.version_id, now, auth.user.id, auth.user.id, now, deliverableId, projectId, input.expectedRevision],
       );
       if (changed.changes !== 1) this.throwLatestDeliverable(projectId, deliverableId);
       if (deliverable.task_id !== null) this.recomputeTaskAndAncestors(projectId, deliverable.task_id, auth.user.id, now);
@@ -1307,7 +1316,7 @@ export class ScheduleService {
       const now = this.dependencies.clock().toISOString();
       const changed = this.dependencies.database.run(
         `UPDATE deliverable_requirements
-            SET fulfilled_resource_id=NULL, fulfilled_at=NULL, fulfilled_by=NULL, accepted_at=NULL, accepted_by=NULL,
+            SET fulfilled_resource_id=NULL, fulfilled_resource_version_id=NULL, fulfilled_at=NULL, fulfilled_by=NULL, accepted_at=NULL, accepted_by=NULL,
                 updated_by=?, updated_at=?, revision=revision+1
           WHERE id=? AND project_id=? AND revision=?`,
         [auth.user.id, now, deliverableId, projectId, expectedRevision],
@@ -1387,7 +1396,7 @@ export class ScheduleService {
       const source = this.requireTask(projectId, rule.source_task_id); const now = this.dependencies.clock().toISOString(); const tasks: TaskEntity[] = [];
       const participants = this.activeParticipantRowsForTask(projectId, source.id);
       const deliverables = this.dependencies.database.all<DeliverableRow>(
-        `SELECT id, project_id, task_id, milestone_id, title, description, fulfilled_resource_id,
+        `SELECT id, project_id, task_id, milestone_id, title, description, fulfilled_resource_id, fulfilled_resource_version_id,
                 fulfilled_at, fulfilled_by, accepted_at, accepted_by, created_at, updated_at, revision
            FROM deliverable_requirements
           WHERE project_id=? AND task_id=?`,
@@ -1585,7 +1594,7 @@ export class ScheduleService {
 
   private requireDeliverable(projectId: string, deliverableId: string): DeliverableRow {
     const row = this.dependencies.database.get<DeliverableRow>(
-      `SELECT id, project_id, task_id, milestone_id, title, description, fulfilled_resource_id,
+      `SELECT id, project_id, task_id, milestone_id, title, description, fulfilled_resource_id, fulfilled_resource_version_id,
               fulfilled_at, fulfilled_by, accepted_at, accepted_by, created_at, updated_at, revision
          FROM deliverable_requirements WHERE project_id=? AND id=?`, [projectId, deliverableId],
     );
@@ -1634,7 +1643,7 @@ export class ScheduleService {
     const missing = this.dependencies.database.get<{ count: number }>(
       `SELECT COUNT(*) AS count FROM deliverable_requirements
         WHERE project_id=? AND task_id IS ? AND milestone_id IS ?
-          AND (fulfilled_resource_id IS NULL OR fulfilled_at IS NULL)`, [projectId, taskId, milestoneId],
+          AND (fulfilled_resource_id IS NULL OR fulfilled_resource_version_id IS NULL OR fulfilled_at IS NULL)`, [projectId, taskId, milestoneId],
     )!;
     return missing.count === 0;
   }
@@ -1669,7 +1678,7 @@ export class ScheduleService {
       `UPDATE deliverable_requirements
           SET accepted_at=?, accepted_by=?, updated_by=?, updated_at=?, revision=revision+1
         WHERE project_id=? AND task_id IS ? AND milestone_id IS ?
-          AND fulfilled_resource_id IS NOT NULL AND fulfilled_at IS NOT NULL
+          AND fulfilled_resource_id IS NOT NULL AND fulfilled_resource_version_id IS NOT NULL AND fulfilled_at IS NOT NULL
           AND accepted_at IS NULL`,
       [now, actorId, actorId, now, projectId, taskId, milestoneId],
     );
@@ -1906,7 +1915,7 @@ export class ScheduleService {
   private deliverableRows(projectId: string): DeliverableRow[] {
     return this.dependencies.database.all<DeliverableRow>(
       `SELECT id, project_id, task_id, milestone_id, title, description,
-              fulfilled_resource_id, fulfilled_at, fulfilled_by,
+              fulfilled_resource_id, fulfilled_resource_version_id, fulfilled_at, fulfilled_by,
               accepted_at, accepted_by, created_at, updated_at, revision
          FROM deliverable_requirements
         WHERE project_id = ?

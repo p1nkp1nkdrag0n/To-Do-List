@@ -14,10 +14,14 @@ export function parseRequestBody<Output>(
   return result.data;
 }
 
-export function asyncRoute(
-  handler: (request: Request, response: Response, next: NextFunction) => Promise<void>,
+export function asyncRoute<Locals extends Record<string, any>>(
+  handler: (
+    request: Request,
+    response: Response<unknown, Locals>,
+    next: NextFunction,
+  ) => Promise<void>,
 ): RequestHandler {
   return (request, response, next): void => {
-    void handler(request, response, next).catch(next);
+    void handler(request, response as Response<unknown, Locals>, next).catch(next);
   };
 }

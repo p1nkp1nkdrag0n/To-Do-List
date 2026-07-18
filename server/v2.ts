@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -14,6 +15,13 @@ import {
   purgeStaleAttempts,
   systemIntervalScheduler,
 } from "./modules/attempt-housekeeping.js";
+import { BlobStore } from "./modules/resources/blob-store.js";
+import { purgeExpiredTrash } from "./modules/trash-housekeeping.js";
+import { recoverInterruptedRestore } from "./modules/backups/restore-service.js";
+import {
+  acquireDeploymentLock,
+  type DeploymentLockRelease,
+} from "./modules/deployment-lock.js";
 
 export interface V2ServerHandle {
   server: Server;
@@ -35,14 +43,45 @@ export async function startV2Server(
 ): Promise<V2ServerHandle> {
   const clock = options.clock ?? (() => new Date());
   const logger = options.logger ?? defaultV2Logger;
-  const database = openV2Database(config.dbPath);
+  let releaseDeploymentLock: DeploymentLockRelease | undefined;
+  let database: V2Database | undefined;
+  const blobStore = new BlobStore({
+    rootPath: config.uploadPath,
+    maxUploadBytes: config.maxUploadBytes,
+  });
   try {
+    releaseDeploymentLock = await acquireDeploymentLock(config.dbPath);
+    await recoverInterruptedRestore({
+      databasePath: config.dbPath,
+      uploadPath: config.uploadPath,
+    });
+    database = openV2Database(config.dbPath);
     migrateV2Database(database);
     purgeStaleAttempts(database, clock());
+    await blobStore.initialize();
+    blobStore.assertSufficientSpace();
+    await purgeExpiredTrash({
+      database,
+      blobStore,
+      clock,
+      idGenerator: randomUUID,
+    });
   } catch (error) {
-    database.close();
+    database?.close();
+    await releaseDeploymentLock?.();
     throw error;
   }
+  if (database === undefined || releaseDeploymentLock === undefined) {
+    throw new Error("The v2 deployment did not finish initialization.");
+  }
+
+  const closeDatabaseAndRelease = async (): Promise<void> => {
+    try {
+      database.close();
+    } finally {
+      await releaseDeploymentLock();
+    }
+  };
 
   const server = createServer(
     createV2App({
@@ -50,6 +89,9 @@ export async function startV2Server(
       sessionSecret: config.sessionSecret,
       cookieSecure: config.cookieSecure,
       bootstrapCode: config.bootstrapCode,
+      uploadPath: config.uploadPath,
+      maxUploadBytes: config.maxUploadBytes,
+      blobStore,
       trustProxyHops: config.trustProxyHops,
       clock,
       logger,
@@ -65,23 +107,44 @@ export async function startV2Server(
       });
     });
   } catch (error) {
-    database.close();
+    await closeDatabaseAndRelease();
     throw error;
   }
 
   const address = server.address();
   if (address === null || typeof address === "string") {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    database.close();
+    await closeDatabaseAndRelease();
     throw new Error("The v2 server did not expose a TCP address.");
   }
 
   const intervalScheduler =
     options.intervalScheduler ?? systemIntervalScheduler;
+  let trashHousekeepingPromise: Promise<void> | undefined;
+  const runTrashHousekeeping = (): void => {
+    if (trashHousekeepingPromise !== undefined) return;
+    trashHousekeepingPromise = purgeExpiredTrash({
+      database,
+      blobStore,
+      clock,
+      idGenerator: randomUUID,
+    })
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        logger.error(error, {
+          method: "INTERNAL",
+          path: "trash_housekeeping",
+        });
+      })
+      .finally(() => {
+        trashHousekeepingPromise = undefined;
+      });
+  };
   const housekeeping = intervalScheduler.schedule(
     () => {
       try {
         purgeStaleAttempts(database, clock());
+        runTrashHousekeeping();
       } catch (error) {
         logger.error(error, {
           method: "INTERNAL",
@@ -101,13 +164,17 @@ export async function startV2Server(
     closingPromise = (async () => {
       try {
         housekeeping.cancel();
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) =>
-            error === undefined ? resolve() : reject(error),
-          );
-        });
+        try {
+          await new Promise<void>((resolve, reject) => {
+            server.close((error) =>
+              error === undefined ? resolve() : reject(error),
+            );
+          });
+        } finally {
+          await trashHousekeepingPromise;
+        }
       } finally {
-        database.close();
+        await closeDatabaseAndRelease();
       }
     })();
     return closingPromise;
