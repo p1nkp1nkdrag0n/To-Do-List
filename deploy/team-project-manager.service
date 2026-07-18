@@ -1,5 +1,5 @@
 [Unit]
-Description=Team Project Manager
+Description=Team Project Manager v2
 After=network-online.target
 Wants=network-online.target
 
@@ -8,14 +8,14 @@ Type=simple
 User=teamplanner
 Group=teamplanner
 WorkingDirectory=/opt/team-project-manager
-EnvironmentFile=/etc/team-project-manager.env
-ExecStart=/usr/bin/node server/index.js
+EnvironmentFile=/etc/team-project-manager-v2.env
+ExecStart=/usr/bin/node dist-server/server/v2.js
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/var/lib/team-project-manager
+ReadWritePaths=/var/lib/team-project-manager /var/backups/team-project-manager
 
 [Install]
 WantedBy=multi-user.target

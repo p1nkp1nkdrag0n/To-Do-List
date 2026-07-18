@@ -1,4 +1,6 @@
-your-domain.example.com {
+# Replace this LAN hostname and make it resolve to the Windows host.
+https://team-project-manager.lan {
 	encode zstd gzip
+	tls internal
 	reverse_proxy 127.0.0.1:4100
 }
