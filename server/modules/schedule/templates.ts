@@ -367,21 +367,21 @@ export interface BuiltInTemplate {
 export const BUILT_IN_TEMPLATES: readonly BuiltInTemplate[] = [
   {
     id: "builtin-competition",
-    name: "Competition project",
+    name: "竞赛项目模板",
     source: "built_in",
     payload: TeamTemplatePayloadSchema.parse({
       version: 1,
       anchorSemantics: "relative_days",
       phases: [
-        { key: "prepare", name: "Preparation", description: "", position: 0, startOffsetDays: 0, endOffsetDays: 13 },
-        { key: "build", name: "Build and iterate", description: "", position: 1, startOffsetDays: 14, endOffsetDays: 41 },
-        { key: "submit", name: "Submission", description: "", position: 2, startOffsetDays: 42, endOffsetDays: 49 },
+        { key: "prepare", name: "选题与准备", description: "", position: 0, startOffsetDays: 0, endOffsetDays: 13 },
+        { key: "build", name: "开发与迭代", description: "", position: 1, startOffsetDays: 14, endOffsetDays: 41 },
+        { key: "submit", name: "材料提交", description: "", position: 2, startOffsetDays: 42, endOffsetDays: 49 },
       ],
       tasks: [
-        { key: "rules", phaseKey: "prepare", parentKey: null, title: "Analyze competition rules", description: "", position: 0, startOffsetDays: 0, dueOffsetDays: 3 },
-        { key: "proposal", phaseKey: "prepare", parentKey: null, title: "Define proposal and division of work", description: "", position: 1, startOffsetDays: 2, dueOffsetDays: 10 },
-        { key: "prototype", phaseKey: "build", parentKey: null, title: "Build prototype", description: "", position: 0, startOffsetDays: 14, dueOffsetDays: 34 },
-        { key: "materials", phaseKey: "submit", parentKey: null, title: "Finalize submission materials", description: "", position: 0, startOffsetDays: 38, dueOffsetDays: 48 },
+        { key: "rules", phaseKey: "prepare", parentKey: null, title: "解读比赛规则", description: "", position: 0, startOffsetDays: 0, dueOffsetDays: 3 },
+        { key: "proposal", phaseKey: "prepare", parentKey: null, title: "确定方案与成员分工", description: "", position: 1, startOffsetDays: 2, dueOffsetDays: 10 },
+        { key: "prototype", phaseKey: "build", parentKey: null, title: "完成原型并迭代", description: "", position: 0, startOffsetDays: 14, dueOffsetDays: 34 },
+        { key: "materials", phaseKey: "submit", parentKey: null, title: "定稿参赛材料", description: "", position: 0, startOffsetDays: 38, dueOffsetDays: 48 },
       ],
       dependencies: [
         { predecessorTaskKey: "rules", successorTaskKey: "proposal" },
@@ -389,32 +389,32 @@ export const BUILT_IN_TEMPLATES: readonly BuiltInTemplate[] = [
         { predecessorTaskKey: "prototype", successorTaskKey: "materials" },
       ],
       milestones: [
-        { key: "competition-deadline", phaseKey: "submit", title: "Competition deadline", description: "", dueOffsetDays: 49 },
+        { key: "competition-deadline", phaseKey: "submit", title: "比赛提交截止", description: "", dueOffsetDays: 49 },
       ],
       deliverableRequirements: [
-        { ownerType: "task", ownerKey: "materials", title: "Submission package", description: "" },
-        { ownerType: "milestone", ownerKey: "competition-deadline", title: "Submission receipt", description: "" },
+        { ownerType: "task", ownerKey: "materials", title: "完整参赛材料包", description: "" },
+        { ownerType: "milestone", ownerKey: "competition-deadline", title: "提交回执", description: "" },
       ],
     }),
   },
   {
     id: "builtin-research",
-    name: "Research project",
+    name: "科研课题模板",
     source: "built_in",
     payload: TeamTemplatePayloadSchema.parse({
       version: 1,
       anchorSemantics: "relative_days",
       phases: [
-        { key: "question", name: "Question and literature", description: "", position: 0, startOffsetDays: 0, endOffsetDays: 20 },
-        { key: "study", name: "Experiment or study", description: "", position: 1, startOffsetDays: 21, endOffsetDays: 69 },
-        { key: "paper", name: "Analysis and paper", description: "", position: 2, startOffsetDays: 70, endOffsetDays: 104 },
+        { key: "question", name: "问题与文献", description: "", position: 0, startOffsetDays: 0, endOffsetDays: 20 },
+        { key: "study", name: "实验与数据", description: "", position: 1, startOffsetDays: 21, endOffsetDays: 69 },
+        { key: "paper", name: "分析与论文", description: "", position: 2, startOffsetDays: 70, endOffsetDays: 104 },
       ],
       tasks: [
-        { key: "literature", phaseKey: "question", parentKey: null, title: "Literature review", description: "", position: 0, startOffsetDays: 0, dueOffsetDays: 14 },
-        { key: "protocol", phaseKey: "question", parentKey: null, title: "Research protocol", description: "", position: 1, startOffsetDays: 10, dueOffsetDays: 20 },
-        { key: "collect", phaseKey: "study", parentKey: null, title: "Collect data", description: "", position: 0, startOffsetDays: 21, dueOffsetDays: 62 },
-        { key: "analyze", phaseKey: "paper", parentKey: null, title: "Analyze results", description: "", position: 0, startOffsetDays: 63, dueOffsetDays: 82 },
-        { key: "manuscript", phaseKey: "paper", parentKey: null, title: "Write manuscript", description: "", position: 1, startOffsetDays: 78, dueOffsetDays: 103 },
+        { key: "literature", phaseKey: "question", parentKey: null, title: "完成文献调研", description: "", position: 0, startOffsetDays: 0, dueOffsetDays: 14 },
+        { key: "protocol", phaseKey: "question", parentKey: null, title: "制定研究方案", description: "", position: 1, startOffsetDays: 10, dueOffsetDays: 20 },
+        { key: "collect", phaseKey: "study", parentKey: null, title: "采集实验数据", description: "", position: 0, startOffsetDays: 21, dueOffsetDays: 62 },
+        { key: "analyze", phaseKey: "paper", parentKey: null, title: "分析实验结果", description: "", position: 0, startOffsetDays: 63, dueOffsetDays: 82 },
+        { key: "manuscript", phaseKey: "paper", parentKey: null, title: "撰写论文初稿", description: "", position: 1, startOffsetDays: 78, dueOffsetDays: 103 },
       ],
       dependencies: [
         { predecessorTaskKey: "literature", successorTaskKey: "protocol" },
@@ -423,11 +423,11 @@ export const BUILT_IN_TEMPLATES: readonly BuiltInTemplate[] = [
         { predecessorTaskKey: "analyze", successorTaskKey: "manuscript" },
       ],
       milestones: [
-        { key: "paper-review", phaseKey: "paper", title: "Internal manuscript review", description: "", dueOffsetDays: 104 },
+        { key: "paper-review", phaseKey: "paper", title: "论文内部评审", description: "", dueOffsetDays: 104 },
       ],
       deliverableRequirements: [
-        { ownerType: "task", ownerKey: "protocol", title: "Approved protocol", description: "" },
-        { ownerType: "task", ownerKey: "manuscript", title: "Manuscript draft", description: "" },
+        { ownerType: "task", ownerKey: "protocol", title: "定稿研究方案", description: "" },
+        { ownerType: "task", ownerKey: "manuscript", title: "论文初稿", description: "" },
       ],
     }),
   },

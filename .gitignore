@@ -5,6 +5,9 @@ data/
 .env
 .DS_Store
 npm-debug.log*
+.e2e-runtime/
+test-results/
+playwright-report/
 TanWei123.pem
 register-code.txt
 AUTH_SECRET.txt

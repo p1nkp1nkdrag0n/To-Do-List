@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createScheduleFixture,
+  SCHEDULE_NOW,
   type ScheduleFixture,
   type ScheduleTestUser,
 } from "./schedule-fixture.js";
@@ -160,6 +161,22 @@ describe("v2 project resources", () => {
       mimeType: "text/csv",
       sha256: createHash("sha256").update(bytes).digest("hex"),
     });
+    const listed = await leader.agent.get(`/api/projects/${projectId}/resources`);
+    expect(listed.status).toBe(200);
+    expect(
+      listed.body.resources.find(
+        (resource: { id: string }) => resource.id === created.body.resource.id,
+      )?.currentVersion,
+    ).toEqual({
+      id: created.body.version.id,
+      versionNumber: 1,
+      originalFilename: "results.csv",
+      byteSize: bytes.length,
+      mimeType: "text/csv",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      createdBy: leader.id,
+      createdAt: SCHEDULE_NOW.toISOString(),
+    });
     const storedFiles = storedBlobKeys(uploadPath);
     expect(storedFiles).toHaveLength(1);
     expect(storedFiles[0]).toMatch(/^[a-f0-9]{64}$/);
@@ -247,6 +264,15 @@ describe("v2 project resources", () => {
     const trash = await leader.agent.get(`/api/projects/${projectId}/trash/resources`);
     expect(trash.status).toBe(200);
     expect(trash.body.resources).toHaveLength(1);
+
+    const trashDetail = await leader.agent.get(
+      `/api/projects/${projectId}/trash/resources/${created.resource.id}`,
+    );
+    expect(trashDetail.status).toBe(200);
+    expect(trashDetail.body).toMatchObject({
+      resource: { id: created.resource.id, deletedAt: expect.any(String) },
+      versions: [{ id: created.version.id, versionNumber: 1 }],
+    });
 
     const restored = await leader.agent
       .post(`/api/projects/${projectId}/resources/${created.resource.id}/restore`)

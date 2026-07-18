@@ -31,6 +31,11 @@ export interface V2AppDependencies {
   passwordHasher?: (password: string) => Promise<string>;
   passwordVerifier?: (password: string, passwordHash: string) => Promise<boolean>;
   logger?: V2Logger;
+  publishEntityInvalidation?: (
+    projectId: string,
+    entityType: "project" | "task" | "participant" | "resource" | "availability",
+    entityId: string,
+  ) => void;
 }
 
 export interface V2RuntimeDependencies {
@@ -50,6 +55,11 @@ export interface V2RuntimeDependencies {
   passwordHasher: (password: string) => Promise<string>;
   passwordVerifier: (password: string, passwordHash: string) => Promise<boolean>;
   logger: V2Logger;
+  publishEntityInvalidation?: (
+    projectId: string,
+    entityType: "project" | "task" | "participant" | "resource" | "availability",
+    entityId: string,
+  ) => void;
 }
 
 export function resolveDependencies(

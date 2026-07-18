@@ -428,6 +428,13 @@ export class AuthService {
       }
       return { firstAccount: true, authorizationKey: "bootstrap" };
     }
+    if (input.bootstrapCode !== undefined) {
+      throw new HttpError(
+        403,
+        "BOOTSTRAP_CODE_INVALID",
+        "The bootstrap code is invalid.",
+      );
+    }
 
     const invite = this.dependencies.database.get<{ id: string }>(
       `SELECT registration_invites.id

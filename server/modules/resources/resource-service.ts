@@ -8,7 +8,9 @@ import type {
   PatchResource,
   PatchTagRequest,
   ResourceEntity,
+  ResourceListItem,
   ResourceListFilters,
+  ResourceVersionSummary,
   ResourceVersionEntity,
   RestoreVersion,
   TagEntity,
@@ -101,6 +103,19 @@ function toVersion(row: ResourceVersionRow): ResourceVersionEntity {
   };
 }
 
+function toVersionSummary(row: ResourceVersionRow): ResourceVersionSummary {
+  return {
+    id: row.id,
+    versionNumber: row.version_number,
+    originalFilename: row.original_filename,
+    byteSize: row.byte_size,
+    mimeType: row.mime_type,
+    sha256: row.sha256,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
 function toTag(row: TagRow): TagEntity {
   return {
     id: row.id,
@@ -154,7 +169,7 @@ export class ResourceService {
     auth: AuthenticatedSession,
     projectId: string,
     filters: ResourceListFilters,
-  ): ResourceEntity[] {
+  ): ResourceListItem[] {
     this.requireProjectMember(auth, projectId);
     const clauses = ["resources.project_id=?", "resources.deleted_at IS NULL"];
     const parameters: Array<string | number> = [projectId];
@@ -179,7 +194,7 @@ export class ResourceService {
           ORDER BY resources.updated_at DESC, resources.title COLLATE NOCASE`,
         parameters,
       )
-      .map((row) => this.toResource(row));
+      .map((row) => this.toListItem(row));
   }
 
   listTags(auth: AuthenticatedSession, projectId: string): TagEntity[] {
@@ -289,6 +304,17 @@ export class ResourceService {
 
   detail(auth: AuthenticatedSession, projectId: string, resourceId: string): ResourceDetail {
     const resource = this.requireVisibleResource(auth, projectId, resourceId, false);
+    return {
+      resource: this.toResource(resource),
+      versions: this.versionRows(resourceId).map(toVersion),
+    };
+  }
+
+  trashDetail(auth: AuthenticatedSession, projectId: string, resourceId: string): ResourceDetail {
+    const resource = this.requireVisibleResource(auth, projectId, resourceId, true);
+    if (resource.deleted_at === null) {
+      throw new HttpError(404, "RESOURCE_NOT_FOUND", "The resource was not found in the trash.");
+    }
     return {
       resource: this.toResource(resource),
       versions: this.versionRows(resourceId).map(toVersion),
@@ -624,7 +650,7 @@ export class ResourceService {
     });
   }
 
-  trashList(auth: AuthenticatedSession, projectId: string): ResourceEntity[] {
+  trashList(auth: AuthenticatedSession, projectId: string): ResourceListItem[] {
     this.requireProjectMember(auth, projectId);
     return this.dependencies.database
       .all<ResourceRow>(
@@ -632,7 +658,7 @@ export class ResourceService {
           ORDER BY resources.deleted_at DESC, resources.title COLLATE NOCASE`,
         [projectId],
       )
-      .map((row) => this.toResource(row));
+      .map((row) => this.toListItem(row));
   }
 
   restore(
@@ -861,6 +887,24 @@ export class ResourceService {
       deletedAt: row.deleted_at,
       deletedBy: row.deleted_by,
       purgeAfter: row.purge_after,
+    };
+  }
+
+  private toListItem(row: ResourceRow): ResourceListItem {
+    const currentVersion = this.dependencies.database.get<ResourceVersionRow>(
+      `${this.versionSelect()} WHERE resource_id=? AND version_number=?`,
+      [row.id, row.current_version_number],
+    );
+    if (currentVersion === undefined) {
+      throw new HttpError(
+        500,
+        "RESOURCE_VERSION_MISSING",
+        "The resource current version is missing.",
+      );
+    }
+    return {
+      ...this.toResource(row),
+      currentVersion: toVersionSummary(currentVersion),
     };
   }
 

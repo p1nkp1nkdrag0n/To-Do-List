@@ -45,13 +45,17 @@ export function createProjectInviteRedemptionRouter(
   const router = Router();
   const service = new ProjectInviteService(dependencies);
   router.post("/redeem", (request, response: Response<unknown, AuthLocals>) => {
-    response.json(
-      service.redeem(
-        response.locals.auth,
-        parseRequestBody(ProjectInviteRedeemRequestSchema, request),
-        request.ip ?? request.socket.remoteAddress ?? "unknown",
-      ),
+    const result = service.redeem(
+      response.locals.auth,
+      parseRequestBody(ProjectInviteRedeemRequestSchema, request),
+      request.ip ?? request.socket.remoteAddress ?? "unknown",
     );
+    dependencies.publishEntityInvalidation?.(
+      result.projectId,
+      "project",
+      result.projectId,
+    );
+    response.json(result);
   });
   return router;
 }

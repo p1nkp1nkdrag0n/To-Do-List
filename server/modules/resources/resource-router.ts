@@ -256,6 +256,18 @@ export function createResourceRouter(dependencies: V2RuntimeDependencies): Route
       });
     },
   );
+  router.get(
+    "/:projectId/trash/resources/:resourceId",
+    (request, response: Response<unknown, AuthLocals>) => {
+      response.json(
+        service.trashDetail(
+          response.locals.auth,
+          request.params.projectId!,
+          request.params.resourceId!,
+        ),
+      );
+    },
+  );
   router.post(
     "/:projectId/resources/:resourceId/restore",
     (request, response: Response<unknown, AuthLocals>) => {

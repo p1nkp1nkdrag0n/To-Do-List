@@ -143,6 +143,19 @@ export const TagEntitySchema = z
   })
   .strict();
 
+export const ResourceVersionSummarySchema = z
+  .object({
+    id: IdSchema,
+    versionNumber: z.number().int().positive(),
+    originalFilename: z.string().trim().min(1).max(255),
+    byteSize: z.number().int().nonnegative(),
+    mimeType: z.string().trim().min(1).max(255),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    createdBy: IdSchema,
+    createdAt: IsoDateTimeSchema,
+  })
+  .strict();
+
 export const ResourceEntitySchema = z
   .object({
     id: IdSchema,
@@ -231,6 +244,12 @@ export type PermanentDeleteResource = z.infer<
 >;
 export type ResourceListFilters = z.infer<typeof ResourceListFiltersSchema>;
 export type ResourceEntity = z.infer<typeof ResourceEntitySchema>;
+export type ResourceVersionSummary = z.infer<
+  typeof ResourceVersionSummarySchema
+>;
+export type ResourceListItem = ResourceEntity & {
+  currentVersion: ResourceVersionSummary;
+};
 export type ResourceVersionEntity = z.infer<
   typeof ResourceVersionEntitySchema
 >;

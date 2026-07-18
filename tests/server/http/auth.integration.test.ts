@@ -134,6 +134,15 @@ describe("v2 authentication HTTP API", () => {
     });
     expect(second.status).toBe(403);
     expect(second.body.error.code).toBe("REGISTRATION_INVITE_INVALID");
+
+    const reusedBootstrap = await request(application).post("/api/auth/register").send({
+      username: "late-bootstrap-user",
+      displayName: "Late Bootstrap User",
+      password: "password123",
+      bootstrapCode: BOOTSTRAP_CODE,
+    });
+    expect(reusedBootstrap.status).toBe(403);
+    expect(reusedBootstrap.body.error.code).toBe("BOOTSTRAP_CODE_INVALID");
   });
 
   it("consumes a valid registration invite once and leaves later accounts outside the team", async () => {

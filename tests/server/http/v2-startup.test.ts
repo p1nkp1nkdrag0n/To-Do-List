@@ -13,6 +13,7 @@ import {
 } from "../../../server/db/migrations.js";
 import { startServer as startLegacyServer } from "../../../server/startup.js";
 import { startV2Server, type V2ServerHandle } from "../../../server/v2.js";
+import { nodeHttpFetch } from "./node-http-fetch.js";
 
 async function closeServer(server: Server): Promise<void> {
   if (!server.listening) {
@@ -124,7 +125,7 @@ describe("v2 standalone server", () => {
 
     const handle = await startV2Server(config);
     handles.push(handle);
-    const response = await fetch(`${handle.url}/api/auth/me`);
+    const response = await nodeHttpFetch(`${handle.url}/api/auth/me`);
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({
@@ -158,7 +159,7 @@ describe("v2 standalone server", () => {
 
     const restarted = await startV2Server(config);
     handles.push(restarted);
-    expect((await fetch(`${restarted.url}/healthz`)).status).toBe(200);
+    expect((await nodeHttpFetch(`${restarted.url}/healthz`)).status).toBe(200);
   });
 
   it("purges stale authentication and invite attempts during startup", async () => {
@@ -414,10 +415,10 @@ describe("v2 standalone server", () => {
       expect(legacyDbPath).not.toBe(v2Config.dbPath);
 
       const [legacyHealth, v2Health, legacyBoundary, v2Boundary] = await Promise.all([
-        fetch(`${legacyUrl}/healthz`),
-        fetch(`${v2Result.value.url}/healthz`),
-        fetch(`${legacyUrl}/api/projects`),
-        fetch(`${v2Result.value.url}/api/auth/me`),
+        nodeHttpFetch(`${legacyUrl}/healthz`),
+        nodeHttpFetch(`${v2Result.value.url}/healthz`),
+        nodeHttpFetch(`${legacyUrl}/api/projects`),
+        nodeHttpFetch(`${v2Result.value.url}/api/auth/me`),
       ]);
       expect(legacyHealth.status).toBe(200);
       expect(await legacyHealth.json()).toMatchObject({ ok: true });

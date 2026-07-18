@@ -7,7 +7,7 @@ import { parseConfig, type AppConfig } from "./config/env.js";
 import { openV2Database, type V2Database } from "./db/database.js";
 import { migrateV2Database } from "./db/migrations.js";
 import { createV2App } from "./http/app.js";
-import { defaultV2Logger } from "./http/dependencies.js";
+import { defaultV2Logger, resolveDependencies } from "./http/dependencies.js";
 import type { V2Logger } from "./http/errors.js";
 import {
   ATTEMPT_HOUSEKEEPING_INTERVAL_MS,
@@ -22,6 +22,7 @@ import {
   acquireDeploymentLock,
   type DeploymentLockRelease,
 } from "./modules/deployment-lock.js";
+import { CollaborationHub } from "./realtime/collaboration-hub.js";
 
 export interface V2ServerHandle {
   server: Server;
@@ -35,6 +36,10 @@ export interface V2ServerOptions {
   intervalScheduler?: IntervalScheduler;
   attemptHousekeepingIntervalMs?: number;
   logger?: V2Logger;
+  realtimeLockTtlMs?: number;
+  realtimeSweepIntervalMs?: number;
+  realtimePreviewThrottleMs?: number;
+  staticPath?: string | null;
 }
 
 export async function startV2Server(
@@ -83,20 +88,38 @@ export async function startV2Server(
     }
   };
 
+  const appDependencies = resolveDependencies({
+    database,
+    sessionSecret: config.sessionSecret,
+    cookieSecure: config.cookieSecure,
+    bootstrapCode: config.bootstrapCode,
+    uploadPath: config.uploadPath,
+    maxUploadBytes: config.maxUploadBytes,
+    blobStore,
+    trustProxyHops: config.trustProxyHops,
+    clock,
+    logger,
+  });
+  let collaborationHub: CollaborationHub | undefined;
+  const staticPath = options.staticPath === null
+    ? undefined
+    : options.staticPath
+      ?? (config.environment === "production" ? path.resolve(process.cwd(), "dist") : undefined);
   const server = createServer(
-    createV2App({
-      database,
-      sessionSecret: config.sessionSecret,
-      cookieSecure: config.cookieSecure,
-      bootstrapCode: config.bootstrapCode,
-      uploadPath: config.uploadPath,
-      maxUploadBytes: config.maxUploadBytes,
-      blobStore,
-      trustProxyHops: config.trustProxyHops,
-      clock,
-      logger,
-    }),
+    createV2App(
+      {
+        ...appDependencies,
+        publishEntityInvalidation: (projectId, entityType, entityId) =>
+          collaborationHub?.publishEntityInvalidation(projectId, entityType, entityId),
+      },
+      { staticPath },
+    ),
   );
+  collaborationHub = new CollaborationHub(server, appDependencies, {
+    lockTtlMs: options.realtimeLockTtlMs,
+    sweepIntervalMs: options.realtimeSweepIntervalMs,
+    previewThrottleMs: options.realtimePreviewThrottleMs,
+  });
   try {
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => reject(error);
@@ -107,12 +130,14 @@ export async function startV2Server(
       });
     });
   } catch (error) {
+    await collaborationHub.close();
     await closeDatabaseAndRelease();
     throw error;
   }
 
   const address = server.address();
   if (address === null || typeof address === "string") {
+    await collaborationHub.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await closeDatabaseAndRelease();
     throw new Error("The v2 server did not expose a TCP address.");
@@ -165,6 +190,7 @@ export async function startV2Server(
       try {
         housekeeping.cancel();
         try {
+          await collaborationHub.close();
           await new Promise<void>((resolve, reject) => {
             server.close((error) =>
               error === undefined ? resolve() : reject(error),
