@@ -18,10 +18,12 @@ import type {
   SaveTeamTemplateRequest,
   UpdateTeamTemplateRequest,
 } from "../../../shared/schedule-contracts.js";
+import type { ScheduleConflict } from "../../../shared/availability-contracts.js";
 import type { ParticipantStatus, TaskStatus } from "../../../shared/contracts.js";
 import type { V2RuntimeDependencies } from "../../http/dependencies.js";
 import { HttpError } from "../../http/errors.js";
 import { writeActivity } from "../activity.js";
+import { AvailabilityService } from "../availability/availability-service.js";
 import type { AuthenticatedSession } from "../auth/auth-service.js";
 import { createsParentCycle } from "./graph.js";
 import { createsDependencyCycle } from "./graph.js";
@@ -481,7 +483,7 @@ export class ScheduleService {
     dependencies: DependencyEntity[];
     milestones: MilestoneEntity[];
     deliverableRequirements: DeliverableEntity[];
-    conflicts: [];
+    conflicts: ScheduleConflict[];
   } {
     const project = this.requireProjectMember(auth, projectId);
     return {
@@ -493,7 +495,7 @@ export class ScheduleService {
       dependencies: this.dependencyRows(projectId).map(toDependency),
       milestones: this.milestoneRows(projectId).map(toMilestone),
       deliverableRequirements: this.deliverableRows(projectId).map(toDeliverable),
-      conflicts: [],
+      conflicts: new AvailabilityService(this.dependencies).projectConflicts(projectId),
     };
   }
 

@@ -1,5 +1,9 @@
 import express, { type Express } from "express";
 
+import {
+  createMeAvailabilityRouter,
+  createProjectAvailabilityRouter,
+} from "../modules/availability/availability-router.js";
 import { createAuthRouter } from "../modules/auth/auth-router.js";
 import { createRequireAuth } from "../modules/auth/auth-router.js";
 import {
@@ -27,9 +31,11 @@ export function createV2App(dependencies: V2AppDependencies): Express {
   app.use("/api/auth", createAuthRouter(runtime));
   const requireAuth = createRequireAuth(runtime);
   app.use("/api/team", requireAuth, createTeamRouter(runtime));
+  app.use("/api/me", requireAuth, createMeAvailabilityRouter(runtime));
   app.use(
     "/api/projects",
     requireAuth,
+    createProjectAvailabilityRouter(runtime),
     createProjectInviteRouter(runtime),
     createScheduleRouter(runtime),
     createProjectRouter(runtime),

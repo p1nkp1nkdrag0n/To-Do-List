@@ -792,6 +792,111 @@ BEGIN
 END;
 `;
 
+const task4AvailabilitySchema = String.raw`
+ALTER TABLE users
+  ADD COLUMN availability_revision INTEGER NOT NULL DEFAULT 1
+  CHECK (availability_revision >= 1);
+
+CREATE TRIGGER availability_profiles_capacity_insert
+BEFORE INSERT ON availability_profiles
+WHEN NEW.weekly_capacity_minutes > 10080
+BEGIN
+  SELECT RAISE(ABORT, 'weekly capacity must not exceed 10080 minutes');
+END;
+
+CREATE TRIGGER availability_profiles_capacity_update
+BEFORE UPDATE OF weekly_capacity_minutes ON availability_profiles
+WHEN NEW.weekly_capacity_minutes > 10080
+BEGIN
+  SELECT RAISE(ABORT, 'weekly capacity must not exceed 10080 minutes');
+END;
+
+CREATE TRIGGER availability_profiles_no_overlap_insert
+BEFORE INSERT ON availability_profiles
+WHEN EXISTS (
+  SELECT 1 FROM availability_profiles
+   WHERE user_id = NEW.user_id
+     AND valid_from <= NEW.valid_through
+     AND valid_through >= NEW.valid_from
+)
+BEGIN
+  SELECT RAISE(ABORT, 'availability profile date ranges must not overlap');
+END;
+
+CREATE TRIGGER availability_profiles_no_overlap_update
+BEFORE UPDATE OF user_id, valid_from, valid_through ON availability_profiles
+WHEN EXISTS (
+  SELECT 1 FROM availability_profiles
+   WHERE user_id = NEW.user_id
+     AND id <> OLD.id
+     AND valid_from <= NEW.valid_through
+     AND valid_through >= NEW.valid_from
+)
+BEGIN
+  SELECT RAISE(ABORT, 'availability profile date ranges must not overlap');
+END;
+
+CREATE TRIGGER availability_profiles_preserve_exception_dates
+BEFORE UPDATE OF valid_from, valid_through ON availability_profiles
+WHEN EXISTS (
+  SELECT 1 FROM availability_exceptions
+   WHERE profile_id = OLD.id
+     AND (exception_date < NEW.valid_from OR exception_date > NEW.valid_through)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'existing availability exceptions must remain inside the profile period');
+END;
+
+CREATE TRIGGER availability_slots_no_overlap_insert
+BEFORE INSERT ON availability_slots
+WHEN EXISTS (
+  SELECT 1 FROM availability_slots
+   WHERE profile_id = NEW.profile_id
+     AND day_of_week = NEW.day_of_week
+     AND start_minute < NEW.end_minute
+     AND end_minute > NEW.start_minute
+)
+BEGIN
+  SELECT RAISE(ABORT, 'weekly availability slots must not overlap');
+END;
+
+CREATE TRIGGER availability_slots_no_overlap_update
+BEFORE UPDATE OF profile_id, day_of_week, start_minute, end_minute ON availability_slots
+WHEN EXISTS (
+  SELECT 1 FROM availability_slots
+   WHERE profile_id = NEW.profile_id
+     AND id <> OLD.id
+     AND day_of_week = NEW.day_of_week
+     AND start_minute < NEW.end_minute
+     AND end_minute > NEW.start_minute
+)
+BEGIN
+  SELECT RAISE(ABORT, 'weekly availability slots must not overlap');
+END;
+
+CREATE TRIGGER availability_exceptions_within_profile_insert
+BEFORE INSERT ON availability_exceptions
+WHEN NOT EXISTS (
+  SELECT 1 FROM availability_profiles
+   WHERE id = NEW.profile_id
+     AND NEW.exception_date BETWEEN valid_from AND valid_through
+)
+BEGIN
+  SELECT RAISE(ABORT, 'availability exception must be inside its profile period');
+END;
+
+CREATE TRIGGER availability_exceptions_within_profile_update
+BEFORE UPDATE OF profile_id, exception_date ON availability_exceptions
+WHEN NOT EXISTS (
+  SELECT 1 FROM availability_profiles
+   WHERE id = NEW.profile_id
+     AND NEW.exception_date BETWEEN valid_from AND valid_through
+)
+BEGIN
+  SELECT RAISE(ABORT, 'availability exception must be inside its profile period');
+END;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -810,6 +915,12 @@ export const MIGRATIONS: readonly Migration[] = [
     name: "task3_schedule_domain",
     sql: task3ScheduleSchema,
     checksum: migrationChecksum(task3ScheduleSchema),
+  },
+  {
+    version: 4,
+    name: "task4_availability_conflicts",
+    sql: task4AvailabilitySchema,
+    checksum: migrationChecksum(task4AvailabilitySchema),
   },
 ];
 

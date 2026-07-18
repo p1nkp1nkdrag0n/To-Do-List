@@ -23,6 +23,8 @@ const task1MigrationChecksum =
   "56c7054dda8fe1ea4278678688957b9156cbcb517dc9cfada9830efa12cf5a13";
 const task2MigrationChecksum =
   "b10f182275922760cf52d052fae18c05b6534dc53de1cc4a4b8f7106bfa67c5c";
+const task3MigrationChecksum =
+  "878c2980a4c033c11fc63ed7bed1a56c16ed14cd2e041961ad555d7fb5a04878";
 
 const requiredTables = [
   "activity_log",
@@ -234,18 +236,116 @@ function insertResource(
 }
 
 describe("v2 schema migrations", () => {
-  it("keeps migrations 1 and 2 immutable while adding Task 3 as migration 3", () => {
+  it("keeps migrations 1 through 3 immutable while adding availability as migration 4", () => {
     expect(
-      MIGRATIONS.slice(0, 2).map(({ version, checksum }) => ({
+      MIGRATIONS.slice(0, 3).map(({ version, checksum }) => ({
         version,
         checksum,
       })),
     ).toEqual([
       { version: 1, checksum: task1MigrationChecksum },
       { version: 2, checksum: task2MigrationChecksum },
+      { version: 3, checksum: task3MigrationChecksum },
     ]);
-    expect(MIGRATIONS.at(-1)?.version).toBe(3);
-    expect(CURRENT_SCHEMA_VERSION).toBe(3);
+    expect(MIGRATIONS.at(-1)?.version).toBe(4);
+    expect(CURRENT_SCHEMA_VERSION).toBe(4);
+  });
+
+  it("adds an independent availability document revision in migration 4", () => {
+    const database = openV2Database(":memory:");
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY CHECK (version >= 1),
+        name TEXT NOT NULL UNIQUE,
+        checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+        applied_at TEXT NOT NULL
+      );
+      ${MIGRATIONS[0]!.sql}
+      ${MIGRATIONS[1]!.sql}
+      ${MIGRATIONS[2]!.sql}
+    `);
+    for (const migration of MIGRATIONS.slice(0, 3)) {
+      database.run(
+        `INSERT INTO schema_migrations (version, name, checksum, applied_at)
+         VALUES (?, ?, ?, ?)`,
+        [migration.version, migration.name, migration.checksum, timestamp],
+      );
+    }
+
+    migrateV2Database(database, () => timestamp);
+
+    expect(
+      database
+        .all<{ name: string }>("PRAGMA table_info(users)")
+        .map(({ name }) => name),
+    ).toContain("availability_revision");
+    database.run(
+      `INSERT INTO users
+        (id, username, password_hash, display_name, created_at, updated_at)
+       VALUES ('00000000-0000-4000-8000-000000000099', 'availability-user',
+               'hash', 'Availability User', ?, ?)`,
+      [timestamp, timestamp],
+    );
+    expect(
+      database.get<{ availability_revision: number }>(
+        "SELECT availability_revision FROM users WHERE username='availability-user'",
+      ),
+    ).toEqual({ availability_revision: 1 });
+    expect(
+      database.all<{ version: number }>(
+        "SELECT version FROM schema_migrations ORDER BY version",
+      ),
+    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
+  });
+
+  it("enforces availability capacity and exception dates in migration 4", () => {
+    const database = migratedDatabase();
+    const { userId } = seedProject(database);
+    const profileId = "00000000-0000-4000-8000-000000000097";
+
+    expect(() =>
+      database.run(
+        `INSERT INTO availability_profiles
+          (id, user_id, valid_from, valid_through, weekly_capacity_minutes,
+           created_at, updated_at)
+         VALUES (?, ?, '2026-07-20', '2026-12-31', 10081, ?, ?)`,
+        [profileId, userId, timestamp, timestamp],
+      ),
+    ).toThrow(/weekly capacity/i);
+
+    database.run(
+      `INSERT INTO availability_profiles
+        (id, user_id, valid_from, valid_through, weekly_capacity_minutes,
+         created_at, updated_at)
+       VALUES (?, ?, '2026-07-20', '2026-12-31', 600, ?, ?)`,
+      [profileId, userId, timestamp, timestamp],
+    );
+    expect(() =>
+      database.run(
+        `INSERT INTO availability_exceptions
+          (id, profile_id, exception_date, kind, start_minute, end_minute,
+           created_at, updated_at)
+         VALUES ('00000000-0000-4000-8000-000000000098', ?, '2027-01-01',
+                 'unavailable', 540, 570, ?, ?)`,
+        [profileId, timestamp, timestamp],
+      ),
+    ).toThrow(/profile period/i);
+
+    database.run(
+      `INSERT INTO availability_exceptions
+        (id, profile_id, exception_date, kind, start_minute, end_minute,
+         created_at, updated_at)
+       VALUES ('00000000-0000-4000-8000-000000000098', ?, '2026-08-01',
+               'unavailable', 540, 570, ?, ?)`,
+      [profileId, timestamp, timestamp],
+    );
+    expect(() =>
+      database.run(
+        "UPDATE availability_profiles SET valid_through='2026-07-31' WHERE id=?",
+        [profileId],
+      ),
+    ).toThrow(/existing availability exceptions/i);
   });
 
   it("upgrades an applied v2 database to the Task 3 schedule schema", () => {
@@ -275,7 +375,7 @@ describe("v2 schema migrations", () => {
       database.all<{ version: number }>(
         "SELECT version FROM schema_migrations ORDER BY version",
       ),
-    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
     expect(
       database
         .all<{ name: string }>("PRAGMA table_info(projects)")
