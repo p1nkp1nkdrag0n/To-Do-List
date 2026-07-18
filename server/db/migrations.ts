@@ -654,6 +654,144 @@ BEGIN
 END;
 `;
 
+const task3ScheduleSchema = String.raw`
+ALTER TABLE projects
+  ADD COLUMN schedule_revision INTEGER NOT NULL DEFAULT 1
+  CHECK (schedule_revision >= 1);
+
+ALTER TABLE task_dependencies
+  ADD COLUMN revision INTEGER NOT NULL DEFAULT 1
+  CHECK (revision >= 1);
+
+ALTER TABLE task_dependencies
+  ADD COLUMN deleted_at TEXT;
+
+ALTER TABLE task_dependencies
+  ADD COLUMN deleted_by TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE task_participants
+  ADD COLUMN removed_at TEXT;
+
+ALTER TABLE task_participants
+  ADD COLUMN removed_by TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE team_schedule_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  anchor_semantics TEXT NOT NULL DEFAULT 'relative_days'
+    CHECK (anchor_semantics = 'relative_days'),
+  payload_json TEXT NOT NULL,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  updated_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  archived_at TEXT,
+  archived_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  CHECK (
+    (archived_at IS NULL AND archived_by IS NULL) OR
+    archived_at IS NOT NULL
+  )
+);
+
+CREATE UNIQUE INDEX idx_team_schedule_templates_active_name
+  ON team_schedule_templates(name COLLATE NOCASE)
+  WHERE archived_at IS NULL;
+
+CREATE UNIQUE INDEX idx_tasks_recurring_occurrence
+  ON tasks(recurring_rule_id, occurrence_date)
+  WHERE recurring_rule_id IS NOT NULL
+    AND occurrence_date IS NOT NULL
+    AND deleted_at IS NULL;
+
+CREATE TRIGGER task_participants_require_positive_estimate_insert
+BEFORE INSERT ON task_participants
+WHEN NEW.estimated_minutes <= 0
+BEGIN
+  SELECT RAISE(ABORT, 'participant estimated minutes must be positive');
+END;
+
+CREATE TRIGGER task_participants_require_positive_estimate_update
+BEFORE UPDATE OF estimated_minutes ON task_participants
+WHEN NEW.estimated_minutes <= 0
+BEGIN
+  SELECT RAISE(ABORT, 'participant estimated minutes must be positive');
+END;
+
+CREATE TRIGGER progress_updates_are_immutable_update
+BEFORE UPDATE ON progress_updates
+BEGIN
+  SELECT RAISE(ABORT, 'progress updates are immutable');
+END;
+
+CREATE TRIGGER progress_updates_are_immutable_delete
+BEFORE DELETE ON progress_updates
+BEGIN
+  SELECT RAISE(ABORT, 'progress updates are immutable');
+END;
+
+DROP TRIGGER users_require_task_reassignment_before_disable;
+DROP TRIGGER task_participants_require_active_member_insert;
+DROP TRIGGER task_participants_require_active_member_update;
+DROP TRIGGER project_members_preserve_task_participants;
+
+CREATE TRIGGER users_require_active_task_reassignment_before_disable
+BEFORE UPDATE OF disabled_at ON users
+WHEN OLD.disabled_at IS NULL
+ AND NEW.disabled_at IS NOT NULL
+ AND EXISTS (
+   SELECT 1 FROM task_participants
+    WHERE user_id = OLD.id AND removed_at IS NULL
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'user still has active task participants that require reassignment');
+END;
+
+CREATE TRIGGER task_participants_require_active_member_insert
+BEFORE INSERT ON task_participants
+WHEN NEW.removed_at IS NULL AND NOT EXISTS (
+  SELECT 1
+    FROM project_members
+    JOIN users ON users.id = project_members.user_id
+   WHERE project_members.project_id = NEW.project_id
+     AND project_members.user_id = NEW.user_id
+     AND project_members.removed_at IS NULL
+     AND users.disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'task participant must be an active project member with an enabled user');
+END;
+
+CREATE TRIGGER task_participants_require_active_member_update
+BEFORE UPDATE OF project_id, user_id, removed_at ON task_participants
+WHEN NEW.removed_at IS NULL AND NOT EXISTS (
+  SELECT 1
+    FROM project_members
+    JOIN users ON users.id = project_members.user_id
+   WHERE project_members.project_id = NEW.project_id
+     AND project_members.user_id = NEW.user_id
+     AND project_members.removed_at IS NULL
+     AND users.disabled_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'task participant must be an active project member with an enabled user');
+END;
+
+CREATE TRIGGER project_members_preserve_active_task_participants
+BEFORE UPDATE OF removed_at ON project_members
+WHEN OLD.removed_at IS NULL
+ AND NEW.removed_at IS NOT NULL
+ AND EXISTS (
+   SELECT 1 FROM task_participants
+    WHERE project_id = OLD.project_id
+      AND user_id = OLD.user_id
+      AND removed_at IS NULL
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'project member still has active task participants');
+END;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -666,6 +804,12 @@ export const MIGRATIONS: readonly Migration[] = [
     name: "task2_auth_team_projects",
     sql: task2AuthTeamProjectsSchema,
     checksum: migrationChecksum(task2AuthTeamProjectsSchema),
+  },
+  {
+    version: 3,
+    name: "task3_schedule_domain",
+    sql: task3ScheduleSchema,
+    checksum: migrationChecksum(task3ScheduleSchema),
   },
 ];
 

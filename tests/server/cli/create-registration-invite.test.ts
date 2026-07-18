@@ -144,7 +144,7 @@ describe("v2 registration invite CLI", () => {
       reopened.get<{ version: number }>(
         "SELECT MAX(version) AS version FROM schema_migrations",
       ),
-    ).toEqual({ version: 2 });
+    ).toEqual({ version: 3 });
     expect(stored!.created_by).toBe("user-leader");
     expect(stored!.code_hash).toBe(
       createHash("sha256").update(output.code, "utf8").digest("hex"),

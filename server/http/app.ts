@@ -7,6 +7,7 @@ import {
   createProjectInviteRouter,
 } from "../modules/invites/invite-router.js";
 import { createProjectRouter } from "../modules/projects/project-router.js";
+import { createScheduleRouter } from "../modules/schedule/schedule-router.js";
 import { createTeamRouter } from "../modules/team/team-router.js";
 import {
   resolveDependencies,
@@ -30,6 +31,7 @@ export function createV2App(dependencies: V2AppDependencies): Express {
     "/api/projects",
     requireAuth,
     createProjectInviteRouter(runtime),
+    createScheduleRouter(runtime),
     createProjectRouter(runtime),
   );
   app.use(

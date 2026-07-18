@@ -21,6 +21,8 @@ const temporaryDirectories: string[] = [];
 const timestamp = "2026-07-17T08:30:00.000Z";
 const task1MigrationChecksum =
   "56c7054dda8fe1ea4278678688957b9156cbcb517dc9cfada9830efa12cf5a13";
+const task2MigrationChecksum =
+  "b10f182275922760cf52d052fae18c05b6534dc53de1cc4a4b8f7106bfa67c5c";
 
 const requiredTables = [
   "activity_log",
@@ -232,6 +234,107 @@ function insertResource(
 }
 
 describe("v2 schema migrations", () => {
+  it("keeps migrations 1 and 2 immutable while adding Task 3 as migration 3", () => {
+    expect(
+      MIGRATIONS.slice(0, 2).map(({ version, checksum }) => ({
+        version,
+        checksum,
+      })),
+    ).toEqual([
+      { version: 1, checksum: task1MigrationChecksum },
+      { version: 2, checksum: task2MigrationChecksum },
+    ]);
+    expect(MIGRATIONS.at(-1)?.version).toBe(3);
+    expect(CURRENT_SCHEMA_VERSION).toBe(3);
+  });
+
+  it("upgrades an applied v2 database to the Task 3 schedule schema", () => {
+    const database = openV2Database(":memory:");
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY CHECK (version >= 1),
+        name TEXT NOT NULL UNIQUE,
+        checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+        applied_at TEXT NOT NULL
+      );
+      ${MIGRATIONS[0]!.sql}
+      ${MIGRATIONS[1]!.sql}
+    `);
+    for (const migration of MIGRATIONS.slice(0, 2)) {
+      database.run(
+        `INSERT INTO schema_migrations (version, name, checksum, applied_at)
+         VALUES (?, ?, ?, ?)`,
+        [migration.version, migration.name, migration.checksum, timestamp],
+      );
+    }
+
+    migrateV2Database(database, () => timestamp);
+
+    expect(
+      database.all<{ version: number }>(
+        "SELECT version FROM schema_migrations ORDER BY version",
+      ),
+    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+    expect(
+      database
+        .all<{ name: string }>("PRAGMA table_info(projects)")
+        .map(({ name }) => name),
+    ).toContain("schedule_revision");
+    expect(
+      database
+        .all<{ name: string }>("PRAGMA table_info(task_dependencies)")
+        .map(({ name }) => name),
+    ).toEqual(expect.arrayContaining(["revision", "deleted_at", "deleted_by"]));
+    expect(
+      database.get<{ count: number }>(
+        `SELECT COUNT(*) AS count
+           FROM sqlite_schema
+          WHERE type = 'table' AND name = 'team_schedule_templates'`,
+      ),
+    ).toEqual({ count: 1 });
+  });
+
+  it("enforces immutable progress and positive participant estimates in migration 3", () => {
+    const database = migratedDatabase();
+    const { projectId, taskId, userId } = seedProject(database);
+    const participantId = "00000000-0000-4000-8000-000000000090";
+    const progressId = "00000000-0000-4000-8000-000000000091";
+
+    expect(() =>
+      database.run(
+        `INSERT INTO task_participants
+          (id, project_id, task_id, user_id, start_date, end_date,
+           estimated_minutes, created_by, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 0, ?, ?, ?, ?)`,
+        [participantId, projectId, taskId, userId, userId, userId, timestamp, timestamp],
+      ),
+    ).toThrow(/estimated minutes must be positive/i);
+
+    database.run(
+      `INSERT INTO task_participants
+        (id, project_id, task_id, user_id, start_date, end_date,
+         estimated_minutes, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '2026-07-18', '2026-07-19', 60, ?, ?, ?, ?)`,
+      [participantId, projectId, taskId, userId, userId, userId, timestamp, timestamp],
+    );
+    database.run(
+      `INSERT INTO progress_updates
+        (id, participant_id, completion_percent, summary, created_by, created_at)
+       VALUES (?, ?, 10, 'Started', ?, ?)`,
+      [progressId, participantId, userId, timestamp],
+    );
+
+    expect(() =>
+      database.run(
+        "UPDATE progress_updates SET summary = 'Changed' WHERE id = ?",
+        [progressId],
+      ),
+    ).toThrow(/progress updates are immutable/i);
+    expect(() =>
+      database.run("DELETE FROM progress_updates WHERE id = ?", [progressId]),
+    ).toThrow(/progress updates are immutable/i);
+  });
   it("stores a deterministic SHA-256 checksum for every migration", () => {
     const database = migratedDatabase();
     const migration = MIGRATIONS[0] as (typeof MIGRATIONS)[number] & {
