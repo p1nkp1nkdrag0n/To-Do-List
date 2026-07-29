@@ -1,8 +1,18 @@
 import { useState, type FormEvent } from "react";
-import { ArrowRight, LockKeyhole, Users } from "lucide-react";
+import {
+  ArrowRight,
+  Eye,
+  EyeOff,
+  KeyRound,
+  LockKeyhole,
+  TicketCheck,
+  UserRound,
+} from "lucide-react";
 
+import { BrandMark } from "../../components/BrandMark";
 import { api, errorMessage } from "../../lib/api";
 import type { AuthState } from "../../types";
+import { AsciiFlowCanvas } from "./AsciiFlowCanvas";
 
 interface AuthScreenProps {
   onAuthenticated: (auth: AuthState) => void;
@@ -15,6 +25,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [password, setPassword] = useState("");
   const [registrationCode, setRegistrationCode] = useState("");
   const [bootstrap, setBootstrap] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -46,41 +57,99 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
   return (
     <main className="auth-page">
-      <section className="auth-context">
-        <div className="auth-brand">研程</div>
-        <h1>比赛与科研任务排期</h1>
-        <p>让固定小团队在同一条时间线上明确负责人、投入工时、交付节点与资料版本。</p>
-        <ul>
-          <li><span><Users size={18} /></span>3–8 人固定团队协作</li>
-          <li><span><LockKeyhole size={18} /></span>局域网部署，资料留在团队主机</li>
-        </ul>
-      </section>
+      <AsciiFlowCanvas />
       <section className="auth-panel">
+        <BrandMark auth />
         <div className="auth-tabs" role="tablist">
-          <button className={mode === "login" ? "active" : ""} type="button" onClick={() => setMode("login")}>登录</button>
-          <button className={mode === "register" ? "active" : ""} type="button" onClick={() => setMode("register")}>注册账号</button>
+          <button
+            aria-selected={mode === "login"}
+            className={mode === "login" ? "active" : ""}
+            role="tab"
+            type="button"
+            onClick={() => setMode("login")}
+          >
+            登录
+          </button>
+          <button
+            aria-selected={mode === "register"}
+            className={mode === "register" ? "active" : ""}
+            role="tab"
+            type="button"
+            onClick={() => setMode("register")}
+          >
+            注册账号
+          </button>
         </div>
-        <form onSubmit={submit}>
-          <h2>{mode === "login" ? "进入团队工作区" : "创建个人账号"}</h2>
+        <form aria-label={mode === "login" ? "登录" : "注册账号"} onSubmit={submit}>
           {mode === "register" ? (
-            <label>
-              显示名称
-              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={80} autoComplete="name" />
+            <label className="auth-field">
+              <span>显示名称</span>
+              <span className="auth-input-shell">
+                <UserRound size={18} aria-hidden="true" />
+                <input
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  required
+                  maxLength={80}
+                  autoComplete="name"
+                  placeholder="团队中显示的名称"
+                />
+              </span>
             </label>
           ) : null}
-          <label>
-            用户名
-            <input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={3} maxLength={32} autoComplete="username" />
+          <label className="auth-field">
+            <span>用户名</span>
+            <span className="auth-input-shell">
+              <UserRound size={18} aria-hidden="true" />
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                required
+                minLength={3}
+                maxLength={32}
+                autoComplete="username"
+                placeholder="请输入用户名"
+              />
+            </span>
           </label>
-          <label>
-            密码
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={mode === "register" ? 8 : 1} autoComplete={mode === "register" ? "new-password" : "current-password"} />
-          </label>
+          <div className="auth-field">
+            <label htmlFor="auth-password">密码</label>
+            <span className="auth-input-shell">
+              <LockKeyhole size={18} aria-hidden="true" />
+              <input
+                id="auth-password"
+                type={passwordVisible ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                minLength={mode === "register" ? 8 : 1}
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
+                placeholder="请输入密码"
+              />
+              <button
+                className="auth-password-toggle"
+                type="button"
+                aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
+                title={passwordVisible ? "隐藏密码" : "显示密码"}
+                onClick={() => setPasswordVisible((current) => !current)}
+              >
+                {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </span>
+          </div>
           {mode === "register" ? (
             <>
-              <label>
-                注册邀请码或初始化码
-                <input value={registrationCode} onChange={(event) => setRegistrationCode(event.target.value)} autoComplete="one-time-code" />
+              <label className="auth-field">
+                <span>注册邀请码或初始化码</span>
+                <span className="auth-input-shell">
+                  <TicketCheck size={18} aria-hidden="true" />
+                  <input
+                    value={registrationCode}
+                    onChange={(event) => setRegistrationCode(event.target.value)}
+                    autoComplete="one-time-code"
+                    placeholder="输入邀请码或初始化码"
+                  />
+                </span>
               </label>
               <label className="check-row">
                 <input type="checkbox" checked={bootstrap} onChange={(event) => setBootstrap(event.target.checked)} />
@@ -90,8 +159,19 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           ) : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <button className="primary-button auth-submit" type="submit" disabled={busy}>
-            {busy ? "正在处理…" : mode === "login" ? "登录" : "注册并登录"}
-            <ArrowRight size={17} />
+            {busy ? (
+              "正在处理…"
+            ) : mode === "login" ? (
+              <>
+                <KeyRound size={17} />
+                进入工作区
+              </>
+            ) : (
+              <>
+                注册并登录
+                <ArrowRight size={17} />
+              </>
+            )}
           </button>
         </form>
       </section>

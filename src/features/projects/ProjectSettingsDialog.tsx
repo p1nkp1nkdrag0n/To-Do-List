@@ -2,14 +2,20 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import {
   Archive,
   ArchiveRestore,
+  CheckCircle2,
+  CircleHelp,
   LoaderCircle,
+  Play,
   Plus,
+  RotateCcw,
   Save,
   Trash2,
   UserMinus,
 } from "lucide-react";
 
 import { Modal } from "../../components/Modal";
+import { tourDefinition } from "../onboarding/tour-definitions";
+import type { TourProgress, TourSection } from "../onboarding/tour-types";
 import { api, errorMessage } from "../../lib/api";
 import type {
   ProjectDetail,
@@ -19,17 +25,29 @@ import type {
   TeamMember,
 } from "../../types";
 
-type SettingsTab = "current" | "tasks" | "projects";
+type SettingsTab = "current" | "tasks" | "projects" | "guide";
 
 interface ProjectSettingsDialogProps {
   project?: ProjectDetail;
   teamMembers: TeamMember[];
   online: boolean;
+  guideProgress: TourProgress;
   onClose: () => void;
   onChanged: () => Promise<void>;
+  onReplayGuide: (section: TourSection) => void;
+  onResetGuides: () => void;
 }
 
-export function ProjectSettingsDialog({ project, teamMembers, online, onClose, onChanged }: ProjectSettingsDialogProps) {
+export function ProjectSettingsDialog({
+  project,
+  teamMembers,
+  online,
+  guideProgress,
+  onClose,
+  onChanged,
+  onReplayGuide,
+  onResetGuides,
+}: ProjectSettingsDialogProps) {
   const [tab, setTab] = useState<SettingsTab>(project ? "current" : "projects");
   const [scheduleRevision, setScheduleRevision] = useState<number>();
   const [archivedTasks, setArchivedTasks] = useState<TaskLifecycleItem[]>([]);
@@ -87,17 +105,83 @@ export function ProjectSettingsDialog({ project, teamMembers, online, onClose, o
           {project ? <button type="button" className={tab === "current" ? "active" : ""} onClick={() => setTab("current")}>当前项目</button> : null}
           {project ? <button type="button" className={tab === "tasks" ? "active" : ""} onClick={() => setTab("tasks")}>任务归档与回收站</button> : null}
           <button type="button" className={tab === "projects" ? "active" : ""} onClick={() => setTab("projects")}>项目归档与回收站</button>
+          <button type="button" className={tab === "guide" ? "active" : ""} onClick={() => setTab("guide")}><CircleHelp size={14} />使用引导</button>
         </nav>
         {error ? <p className="form-error settings-message">{error}</p> : null}
         {loading ? <div className="table-loading"><LoaderCircle className="spin" size={20} />正在读取项目设置</div> : tab === "current" && project ? (
           <CurrentProjectSettings project={project} teamMembers={teamMembers} scheduleRevision={scheduleRevision} online={online} busy={busy} run={run} onChanged={onChanged} onClose={onClose} />
         ) : tab === "tasks" && project ? (
           <TaskLifecycleSettings projectId={project.project.id} scheduleRevision={scheduleRevision} archived={archivedTasks} trash={trashTasks} online={online} busy={busy} run={run} />
+        ) : tab === "guide" ? (
+          <GuideSettings
+            hasProject={Boolean(project)}
+            progress={guideProgress}
+            onReplay={onReplayGuide}
+            onReset={onResetGuides}
+          />
         ) : (
           <ProjectLifecycleSettings archived={archivedProjects} trash={trashProjects} online={online} busy={busy} run={run} />
         )}
       </div>
     </Modal>
+  );
+}
+
+function GuideSettings({
+  hasProject,
+  progress,
+  onReplay,
+  onReset,
+}: {
+  hasProject: boolean;
+  progress: TourProgress;
+  onReplay: (section: TourSection) => void;
+  onReset: () => void;
+}) {
+  const sections: TourSection[] = hasProject
+    ? ["workspace", "resources", "availability"]
+    : ["project-setup"];
+  const locations: Record<TourSection, string> = {
+    "project-setup": "空工作区",
+    workspace: "甘特图",
+    resources: "资料库",
+    availability: "可用时间",
+  };
+
+  return (
+    <div className="project-settings-body guide-settings">
+      <header className="guide-settings-heading">
+        <div>
+          <h3>使用引导</h3>
+          <p>按工作区重新查看功能说明。手动回放不会改变已完成状态。</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={onReset}>
+          <RotateCcw size={15} />重置全部进度
+        </button>
+      </header>
+      <div className="guide-section-list">
+        {sections.map((section) => {
+          const definition = tourDefinition(section);
+          const completed = progress.completedSections.includes(section);
+          return (
+            <article key={section}>
+              <span className={`guide-section-icon ${completed ? "completed" : ""}`}>
+                {completed ? <CheckCircle2 size={18} /> : <CircleHelp size={18} />}
+              </span>
+              <div>
+                <strong>{definition.title}</strong>
+                <small>{definition.steps.length} 步 · {locations[section]}</small>
+              </div>
+              <i className={completed ? "completed" : ""}>{completed ? "已完成" : "未查看"}</i>
+              <button className="secondary-button" type="button" onClick={() => onReplay(section)}>
+                <Play size={14} />回放
+              </button>
+            </article>
+          );
+        })}
+      </div>
+      <p className="guide-reset-note">重置后不会立即弹出；下次进入对应工作区时会再次显示。</p>
+    </div>
   );
 }
 

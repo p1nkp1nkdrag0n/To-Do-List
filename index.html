@@ -3,8 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#ffffff" />
-    <title>研程 · 比赛与科研任务排期</title>
+    <meta name="theme-color" content="#f3f6fa" />
+    <script>
+      (() => {
+        let stored = null;
+        let sidebar = "expanded";
+        try {
+          stored = localStorage.getItem("todo-list.theme.v1");
+          sidebar = localStorage.getItem("todo-list.sidebar.v1") === "collapsed"
+            ? "collapsed"
+            : "expanded";
+        } catch {
+          // Browser storage is optional; system appearance remains available.
+        }
+        const theme = stored === "light" || stored === "dark"
+          ? stored
+          : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.sidebar = sidebar;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <title>TO DO LIST · 比赛与科研任务排期</title>
   </head>
   <body>
     <div id="root"></div>

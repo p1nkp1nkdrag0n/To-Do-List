@@ -2,10 +2,16 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Archive, LoaderCircle, Plus } from "lucide-react";
 
 import { AppShell, type WorkspaceView } from "./components/AppShell";
+import { BrandMark } from "./components/BrandMark";
 import { AuthScreen } from "./features/auth/AuthScreen";
+import { ProductTour } from "./features/onboarding/ProductTour";
+import { tourDefinition } from "./features/onboarding/tour-definitions";
+import type { TourSection } from "./features/onboarding/tour-types";
+import { useProductTour } from "./features/onboarding/useProductTour";
 import { CreateProjectDialog, InviteDialog, RedeemInviteScreen } from "./features/projects/ProjectDialogs";
 import { ProjectSettingsDialog } from "./features/projects/ProjectSettingsDialog";
 import { api, ApiError, errorMessage } from "./lib/api";
+import { useAppearance } from "./lib/useAppearance";
 import { useCollaboration } from "./lib/useCollaboration";
 import type { AuthState, Project, ProjectDetail, TeamMember } from "./types";
 
@@ -15,6 +21,7 @@ const ResourceLibrary = lazy(() => import("./features/resources/ResourceLibrary"
 const AvailabilityView = lazy(() => import("./features/availability/AvailabilityView").then((module) => ({ default: module.AvailabilityView })));
 
 export default function App() {
+  const appearance = useAppearance();
   const [auth, setAuth] = useState<AuthState>();
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -27,6 +34,13 @@ export default function App() {
   const [online, setOnline] = useState(navigator.onLine);
   const [error, setError] = useState("");
   const collaboration = useCollaboration(activeProject?.project.id, auth?.user.id);
+  const tour = useProductTour({
+    userId: auth?.user.id,
+    enabled: Boolean(auth?.teamMember),
+    hasProject: Boolean(activeProject),
+    activeView,
+    autoStartBlocked: showCreateProject || showInvite || showProjectSettings,
+  });
 
   const loadProject = useCallback(async (projectId: string) => {
     const detail = await api.get<ProjectDetail>(`/api/projects/${projectId}`);
@@ -103,10 +117,23 @@ export default function App() {
   };
 
   const projectCreated = (detail: ProjectDetail) => {
+    tour.completeSection("project-setup");
     setProjects((current) => [...current, detail.project]);
     setActiveProject(detail);
     localStorage.setItem(ACTIVE_PROJECT_KEY, detail.project.id);
     setShowCreateProject(false);
+  };
+
+  const replayGuide = (section: TourSection) => {
+    setShowProjectSettings(false);
+    const entryView = tourDefinition(section).entryView;
+    if (entryView) setActiveView(entryView);
+    tour.start(section, true);
+  };
+
+  const openGuidedProjectDialog = () => {
+    tour.pauseForAction();
+    setShowCreateProject(true);
   };
 
   if (loadingAuth) {
@@ -116,18 +143,21 @@ export default function App() {
   if (!auth.teamMember) return <RedeemInviteScreen displayName={auth.user.displayName} onRedeemed={(id) => void redeemed(id)} onLogout={() => void logout()} />;
   if (!activeProject) {
     return (
+      <>
       <main className="empty-workspace">
-        <div className="auth-brand">研程</div>
+        <BrandMark />
         <section>
           <h1>创建第一个项目</h1>
           <p>为本次比赛或科研课题选择固定成员，再建立阶段与任务排期。</p>
           {error ? <p className="form-error">{error}</p> : null}
-          <button className="primary-button" type="button" onClick={() => setShowCreateProject(true)}><Plus size={16} />新建项目</button>
+          <button className="primary-button" type="button" data-tour-id="empty-create-project" onClick={() => setShowCreateProject(true)}><Plus size={16} />新建项目</button>
           <button className="secondary-button" type="button" onClick={() => setShowProjectSettings(true)}><Archive size={16} />项目归档与回收站</button>
         </section>
         {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
-        {showProjectSettings ? <ProjectSettingsDialog teamMembers={teamMembers} online={online} onClose={() => setShowProjectSettings(false)} onChanged={loadWorkspace} /> : null}
+        {showProjectSettings ? <ProjectSettingsDialog teamMembers={teamMembers} online={online} guideProgress={tour.progress} onClose={() => setShowProjectSettings(false)} onChanged={loadWorkspace} onReplayGuide={replayGuide} onResetGuides={tour.resetAll} /> : null}
       </main>
+      <ProductTour controller={tour} onCreateProject={openGuidedProjectDialog} />
+      </>
     );
   }
 
@@ -141,6 +171,8 @@ export default function App() {
         online={online}
         realtimeConnected={collaboration.connected}
         onlineUsers={collaboration.users}
+        appearance={appearance}
+        forceSidebarExpanded={tour.active?.section === "workspace" && tour.viewportSupported}
         onChangeProject={(id) => void loadProject(id).catch((caught) => setError(errorMessage(caught)))}
         onChangeView={setActiveView}
         onCreateProject={() => setShowCreateProject(true)}
@@ -174,7 +206,8 @@ export default function App() {
       </AppShell>
       {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
       {showInvite ? <InviteDialog projectId={activeProject.project.id} projectName={activeProject.project.name} onClose={() => setShowInvite(false)} /> : null}
-      {showProjectSettings ? <ProjectSettingsDialog project={activeProject} teamMembers={teamMembers} online={online} onClose={() => setShowProjectSettings(false)} onChanged={() => loadWorkspace(activeProject.project.id)} /> : null}
+      {showProjectSettings ? <ProjectSettingsDialog project={activeProject} teamMembers={teamMembers} online={online} guideProgress={tour.progress} onClose={() => setShowProjectSettings(false)} onChanged={() => loadWorkspace(activeProject.project.id)} onReplayGuide={replayGuide} onResetGuides={tour.resetAll} /> : null}
+      <ProductTour controller={tour} onCreateProject={openGuidedProjectDialog} />
     </>
   );
 }

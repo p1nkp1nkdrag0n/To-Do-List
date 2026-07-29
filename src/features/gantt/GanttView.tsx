@@ -260,26 +260,51 @@ export function GanttView({ project, currentUserId, online, collaboration }: Gan
     <div className={`gantt-view ${selectedTaskId !== undefined || selectedMilestoneId !== undefined || creatingTask ? "with-drawer" : ""}`}>
       <section className="gantt-workarea">
         <header className="view-toolbar gantt-toolbar">
-          <div className="segmented-control" aria-label="时间尺度">
-            {(["week", "month", "year"] as TimelineScale[]).map((item) => <button key={item} className={scale === item ? "active" : ""} type="button" onClick={() => setScale(item)}>{item === "week" ? "周" : item === "month" ? "月" : "年"}</button>)}
-          </div>
-          <span className="toolbar-divider" />
-          <button className="secondary-button" type="button" title="回到今天" onClick={goToday}><CalendarDays size={16} />今天</button>
-          <button className={`secondary-button ${scale === "fit" ? "active" : ""}`} type="button" title="适应项目范围" onClick={() => { setScale("fit"); setWindowShift(0); }}><ChevronsLeftRight size={16} />适应项目范围</button>
-          <div className="date-navigator">
-            <button className="icon-button" type="button" title="上一时间段" aria-label="上一时间段" onClick={() => setWindowShift((value) => value - (scale === "year" ? 365 : scale === "month" ? 30 : 7))}><ChevronLeft size={17} /></button>
-            <button className="icon-button" type="button" title="下一时间段" aria-label="下一时间段" onClick={() => setWindowShift((value) => value + (scale === "year" ? 365 : scale === "month" ? 30 : 7))}><ChevronRight size={17} /></button>
-            <span>{range.start} — {range.end}</span>
+          <div className="toolbar-group gantt-range-tools glass-panel" data-tour-id="gantt-range-tools">
+            <div className="segmented-control" aria-label="时间尺度">
+              {(["week", "month", "year"] as TimelineScale[]).map((item) => (
+                <button
+                  key={item}
+                  className={scale === item ? "active" : ""}
+                  type="button"
+                  onClick={() => setScale(item)}
+                >
+                  {item === "week" ? "周" : item === "month" ? "月" : "年"}
+                </button>
+              ))}
+            </div>
+            <span className="toolbar-divider" />
+            <button className="secondary-button" type="button" title="回到今天" onClick={goToday}>
+              <CalendarDays size={16} />今天
+            </button>
+            <button
+              className={`secondary-button ${scale === "fit" ? "active" : ""}`}
+              type="button"
+              title="适应项目范围"
+              onClick={() => {
+                setScale("fit");
+                setWindowShift(0);
+              }}
+            >
+              <ChevronsLeftRight size={16} />适应项目范围
+            </button>
+            <div className="date-navigator">
+              <button className="icon-button" type="button" title="上一时间段" aria-label="上一时间段" onClick={() => setWindowShift((value) => value - (scale === "year" ? 365 : scale === "month" ? 30 : 7))}><ChevronLeft size={17} /></button>
+              <button className="icon-button" type="button" title="下一时间段" aria-label="下一时间段" onClick={() => setWindowShift((value) => value + (scale === "year" ? 365 : scale === "month" ? 30 : 7))}><ChevronRight size={17} /></button>
+              <span>{range.start} — {range.end}</span>
+            </div>
           </div>
           <div className="toolbar-spacer" />
-          {schedule.conflicts.length ? <span className="conflict-summary" role="status" title={schedule.conflicts.map(conflictText).join("\n")}><AlertCircle size={16} />{schedule.conflicts.length} 项冲突</span> : null}
-          <button className="secondary-button" type="button" title="项目模板与周期任务" onClick={() => setShowScheduleTools(true)}><Repeat2 size={16} />模板与周期</button>
-          <button className="secondary-button" type="button" title="添加阶段" onClick={() => setStructureMode("phase")}><Layers3 size={16} />阶段</button>
-          <button className="secondary-button" type="button" title="添加里程碑" onClick={() => setStructureMode("milestone")}><Flag size={16} />里程碑</button>
-          <button className="primary-button" type="button" onClick={() => { setCreatingTask(true); setSelectedTaskId(undefined); setSelectedMilestoneId(undefined); }}><Plus size={16} />添加任务</button>
+          <div className="toolbar-group gantt-structure-tools glass-panel" data-tour-id="gantt-structure-tools">
+            {schedule.conflicts.length ? <span className="conflict-summary" role="status" title={schedule.conflicts.map(conflictText).join("\n")}><AlertCircle size={16} />{schedule.conflicts.length} 项冲突</span> : null}
+            <button className="secondary-button" type="button" title="项目模板与周期任务" onClick={() => setShowScheduleTools(true)}><Repeat2 size={16} />模板与周期</button>
+            <button className="secondary-button" type="button" title="添加阶段" onClick={() => setStructureMode("phase")}><Layers3 size={16} />阶段</button>
+            <button className="secondary-button" type="button" title="添加里程碑" onClick={() => setStructureMode("milestone")}><Flag size={16} />里程碑</button>
+            <button className="primary-button" type="button" data-tour-id="gantt-add-task" onClick={() => { setCreatingTask(true); setSelectedTaskId(undefined); setSelectedMilestoneId(undefined); }}><Plus size={16} />添加任务</button>
+          </div>
         </header>
         {error ? <div className="inline-error"><AlertCircle size={16} />{error}<button type="button" onClick={() => void refresh()}><RefreshCw size={14} />重试</button></div> : null}
-        <div className="gantt-table" ref={timelineMeasureRef}>
+        <div className="gantt-table" ref={timelineMeasureRef} data-tour-id="gantt-table">
           <div className="gantt-left-pane">
             <div className="gantt-meta-header"><span>阶段 / 任务 / 分工</span><span>负责人</span><span>状态</span><span>进度</span></div>
             {rows.map((row) => (
@@ -348,7 +373,34 @@ function TimelineHeader({ days, dayWidth }: { days: string[]; dayWidth: number }
     if (previous?.label === label) previous.count += 1;
     else groups.push({ label, count: 1 });
   }
-  return <div className="timeline-header"><div className="timeline-months">{groups.map((group) => <span key={group.label} style={{ width: `${group.count * dayWidth}px` }}>{group.label}</span>)}</div><div className="timeline-days">{days.map((day, index) => { const weekday = new Date(`${day}T00:00:00Z`).getUTCDay(); const show = dayWidth >= 28 || weekday === 1 || day.endsWith("-01"); return <span key={day} className={weekday === 0 || weekday === 6 ? "weekend" : ""} style={{ width: `${dayWidth}px` }}>{show ? formatMonthDay(day) : ""}</span>; })}</div></div>;
+  return (
+    <div className="timeline-header">
+      <div className="timeline-months">
+        {groups.map((group) => (
+          <span key={group.label} style={{ width: `${group.count * dayWidth}px` }}>
+            {group.label}
+          </span>
+        ))}
+      </div>
+      <div className="timeline-days">
+        {days.map((day) => {
+          const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
+          const show = dayWidth >= 28
+            || (dayWidth >= 12 && weekday === 1)
+            || day.endsWith("-01");
+          return (
+            <span
+              key={day}
+              className={weekday === 0 || weekday === 6 ? "weekend" : ""}
+              style={{ width: `${dayWidth}px` }}
+            >
+              {show ? formatMonthDay(day) : ""}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function TimelineRow({ row, index, rangeStart, dayWidth, timelineWidth, conflicted, dragOffset, online, currentUserId, lock, preview, onPointerDown, onSelectTask, onSelectMilestone }: { row: GanttRow; index: number; rangeStart: string; dayWidth: number; timelineWidth: number; conflicted: boolean; dragOffset: number; online: boolean; currentUserId: string; lock?: CollaborationLock; preview?: CollaborationPreview; onPointerDown: (event: ReactPointerEvent, participantId: string) => void; onSelectTask: (taskId: string) => void; onSelectMilestone: (milestoneId: string) => void }) {

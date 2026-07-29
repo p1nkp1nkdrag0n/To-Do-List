@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -9,10 +9,18 @@ interface ModalProps {
 }
 
 export function Modal({ title, children, onClose, width = "medium" }: ModalProps) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className={`modal modal-${width}`}
+        className={`modal modal-${width} glass-panel`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

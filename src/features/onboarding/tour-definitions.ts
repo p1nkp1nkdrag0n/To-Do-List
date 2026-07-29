@@ -1,0 +1,160 @@
+import type { TourDefinition, TourSection } from "./tour-types.js";
+
+export const TOUR_DEFINITIONS: Record<TourSection, TourDefinition> = {
+  "project-setup": {
+    section: "project-setup",
+    title: "开始建立工作区",
+    description: "先创建团队的第一个项目。",
+    steps: [
+      {
+        id: "create-first-project",
+        title: "创建第一个项目",
+        description: "每个项目独立管理成员、排期和资料。先为一次比赛或一个科研课题建立工作区。",
+        targetIds: ["empty-create-project"],
+        icon: "folder",
+        placement: "top",
+        action: "create-project",
+      },
+    ],
+  },
+  workspace: {
+    section: "workspace",
+    title: "甘特图工作区",
+    description: "了解团队排期与协作入口。",
+    entryView: "gantt",
+    steps: [
+      {
+        id: "switch-project",
+        title: "切换当前项目",
+        description: "比赛、课题和课程项目彼此隔离。切换项目后，排期、成员和资料会一起切换。",
+        targetIds: ["project-switcher"],
+        icon: "folder",
+        placement: "right",
+      },
+      {
+        id: "invite-members",
+        title: "邀请项目成员",
+        description: "生成六位项目邀请码，让已注册同学加入。项目成员拥有同等的维护权限。",
+        targetIds: ["project-invite"],
+        icon: "users",
+        placement: "bottom",
+      },
+      {
+        id: "core-workspaces",
+        title: "三个核心工作区",
+        description: "甘特图负责排期，资料库沉淀成果，可用时间用于计算成员容量与冲突。",
+        targetIds: ["workspace-navigation"],
+        icon: "gantt",
+        placement: "right",
+      },
+      {
+        id: "timeline-range",
+        title: "调整时间视图",
+        description: "按周、月或年查看排期，也可以回到今天、适应项目范围，或前后移动时间窗口。",
+        targetIds: ["gantt-range-tools"],
+        icon: "calendar",
+        placement: "bottom",
+      },
+      {
+        id: "project-structure",
+        title: "建立项目结构",
+        description: "从比赛或科研模板开始，也可以添加阶段、里程碑和周期任务组织长期工作。",
+        targetIds: ["gantt-structure-tools"],
+        icon: "layers",
+        placement: "bottom",
+      },
+      {
+        id: "create-task",
+        title: "添加任务与分工",
+        description: "任务可继续拆成子任务，并为成员设置日期窗口、预计工时、依赖和必需交付物。",
+        targetIds: ["gantt-add-task"],
+        icon: "plus",
+        placement: "bottom",
+      },
+      {
+        id: "review-schedule",
+        title: "查看进度与冲突",
+        description: "点击阶段、任务、分工或里程碑打开右侧详情。红色标记表示超期、容量不足、缺少可用时间或依赖倒挂。",
+        targetIds: ["gantt-table"],
+        icon: "table",
+        placement: "top",
+      },
+    ],
+  },
+  resources: {
+    section: "resources",
+    title: "资料库",
+    description: "集中归档文件与 Markdown 成果。",
+    entryView: "resources",
+    steps: [
+      {
+        id: "create-resource",
+        title: "创建与上传资料",
+        description: "上传文件或新建 Markdown 文档，并按阶段、来源任务和标签归档。",
+        targetIds: ["resources-create"],
+        icon: "file",
+        placement: "bottom",
+      },
+      {
+        id: "filter-resources",
+        title: "快速定位成果",
+        description: "通过名称、阶段、来源任务和标签筛选，也可查看归档内容或进入回收站。",
+        targetIds: ["resources-filters"],
+        icon: "search",
+        placement: "bottom",
+      },
+      {
+        id: "resource-versions",
+        title: "管理版本历史",
+        description: "点击表格行打开右侧版本抽屉。添加版本会保留历史，恢复旧版也会生成一个新版本。",
+        targetIds: ["resources-table"],
+        icon: "table",
+        placement: "top",
+      },
+    ],
+  },
+  availability: {
+    section: "availability",
+    title: "可用时间",
+    description: "建立成员容量与冲突计算依据。",
+    entryView: "availability",
+    steps: [
+      {
+        id: "semester-profile",
+        title: "建立学期模板",
+        description: "为当前学期设置生效日期和每周投入上限；不同学期可以分别维护。",
+        targetIds: ["availability-semester"],
+        icon: "calendar",
+        placement: "bottom",
+      },
+      {
+        id: "weekly-slots",
+        title: "标记每周可用时间",
+        description: "以 30 分钟为单位涂选每周可用时段。共享视图只显示忙闲，不展示课程或私人名称。",
+        targetIds: ["availability-grid", "availability-empty"],
+        icon: "table",
+        placement: "right",
+      },
+      {
+        id: "capacity-exceptions",
+        title: "设置容量与临时例外",
+        description: "在时间设置中维护每周上限、临时可用或不可用例外；私人备注仅自己可见。",
+        targetIds: ["availability-settings", "availability-empty"],
+        icon: "settings",
+        placement: "left",
+      },
+      {
+        id: "team-capacity",
+        title: "查看团队容量",
+        description: "团队概览只共享忙闲区间、容量与冲突结果，便于发现排期过载。",
+        targetIds: ["availability-team-capacity"],
+        icon: "users",
+        placement: "top",
+      },
+    ],
+  },
+};
+
+export function tourDefinition(section: TourSection): TourDefinition {
+  return TOUR_DEFINITIONS[section];
+}

@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Check, Copy, Link2, Plus, Users } from "lucide-react";
 
+import { BrandMark } from "../../components/BrandMark";
 import { Modal } from "../../components/Modal";
 import { api, errorMessage } from "../../lib/api";
 import type { ProjectDetail, TeamMember } from "../../types";
@@ -175,7 +176,7 @@ export function RedeemInviteScreen({ displayName, onRedeemed, onLogout }: Redeem
   return (
     <main className="join-page">
       <section>
-        <div className="auth-brand">研程</div>
+        <BrandMark />
         <span className="dialog-icon"><Users size={22} /></span>
         <h1>{displayName}，加入你的项目</h1>
         <p>输入项目成员提供的六位数字邀请码。兑换后会同时加入固定团队与对应项目。</p>

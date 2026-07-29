@@ -19,10 +19,24 @@ async function register(
   bootstrap = false,
 ): Promise<void> {
   await page.goto("/");
-  await page.getByRole("button", { name: "注册账号" }).click();
+  await expect(page.locator(".ascii-flow-canvas")).toBeVisible();
+  const authPanel = page.locator(".auth-panel");
+  await expect(authPanel).toBeVisible();
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("Playwright viewport is required for auth alignment checks.");
+  const panelPosition = await authPanel.evaluate((element, size) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      horizontalOffset: Math.abs(rect.left + rect.width / 2 - size.width / 2),
+      verticalOffset: Math.abs(rect.top + rect.height / 2 - size.height / 2),
+    };
+  }, viewport);
+  expect(panelPosition.horizontalOffset).toBeLessThan(2);
+  expect(panelPosition.verticalOffset).toBeLessThan(2);
+  await page.getByRole("tab", { name: "注册账号" }).click();
   await page.getByLabel("显示名称").fill(account.displayName);
   await page.getByLabel("用户名").fill(account.username);
-  await page.getByLabel("密码").fill(account.password);
+  await page.getByLabel("密码", { exact: true }).fill(account.password);
   await page.getByLabel("注册邀请码或初始化码").fill(code);
   if (bootstrap) {
     await page.getByLabel("这是首次部署的初始化码").check();
@@ -45,7 +59,11 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
 
   await register(page, leader, "e2e-bootstrap-code", true);
   await expect(page.getByRole("heading", { name: "创建第一个项目" })).toBeVisible();
-  await page.getByRole("button", { name: "新建项目" }).click();
+  const setupTour = page.locator('[data-tour-section="project-setup"]');
+  await expect(setupTour).toBeVisible();
+  await expect(setupTour).toContainText("第 1 步，共 1 步");
+  await expect(page.locator('[data-tour-id="empty-create-project"]')).toHaveAttribute("data-tour-id", "empty-create-project");
+  await setupTour.getByRole("button", { name: "开始创建" }).click();
   const projectDialog = page.getByRole("dialog", { name: "新建项目" });
   await projectDialog.getByLabel("项目名称").fill("全国大学生创新训练项目");
   await projectDialog.getByLabel("开始日期").fill("2026-07-20");
@@ -53,7 +71,35 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
   await projectDialog.getByLabel("项目说明").fill("复现实验、论文撰写与答辩材料排期");
   await projectDialog.getByRole("button", { name: "创建项目" }).click();
   await expect(page.getByText("1 名成员")).toBeVisible();
+  const workspaceTour = page.locator('[data-tour-section="workspace"]');
+  await expect(workspaceTour).toBeVisible();
+  await expect(workspaceTour).toContainText("第 1 步，共 7 步");
+  await expect(page.locator('[data-testid="tour-target-shield"]')).toBeVisible();
+  await expect(page.locator("#root")).toHaveAttribute("inert", "");
+  await workspaceTour.getByRole("button", { name: "下一步" }).click();
+  await expect(workspaceTour.getByRole("heading", { name: "邀请项目成员" })).toBeVisible();
+  await workspaceTour.getByRole("button", { name: "上一步" }).click();
+  await expect(workspaceTour.getByRole("heading", { name: "切换当前项目" })).toBeVisible();
+  await workspaceTour.getByRole("button", { name: "跳过本段" }).click();
+  await expect(workspaceTour).toBeHidden();
+  await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
   const activeProjectId = await projectId(page.context());
+
+  await page.getByRole("button", { name: "外观", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "浅色", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await page.evaluate(() => localStorage.getItem("todo-list.theme.v1"))).toBe("light");
+
+  await page.getByRole("button", { name: "收起侧边栏", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
+  await expect(page.locator(".sidebar")).toHaveCSS("width", "68px");
+  expect(await page.evaluate(() => localStorage.getItem("todo-list.sidebar.v1"))).toBe("collapsed");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
+  await page.waitForTimeout(700);
+  await expect(page.locator(".tour-bubble")).toHaveCount(0);
+  await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
 
   await page.getByRole("button", { name: "邀请", exact: true }).click();
   const inviteDialog = page.getByRole("dialog", { name: "邀请项目成员" });
@@ -86,10 +132,25 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
     await memberPage.getByLabel("六位项目邀请码").fill(inviteCode);
     await memberPage.getByRole("button", { name: "加入团队与项目" }).click();
     await expect(memberPage.locator(".topbar-project strong")).toHaveText("全国大学生创新训练项目");
+    const memberWorkspaceTour = memberPage.locator('[data-tour-section="workspace"]');
+    await expect(memberWorkspaceTour).toBeVisible();
+    await memberWorkspaceTour.getByRole("button", { name: "跳过本段" }).click();
     await expect(page.getByText("2 名成员")).toBeVisible();
 
     await memberPage.getByRole("button", { name: "可用时间" }).click();
     await expect(memberPage.getByRole("heading", { name: "我的可用时间" })).toBeVisible();
+    const availabilityTour = memberPage.locator('[data-tour-section="availability"]');
+    await expect(availabilityTour).toBeVisible();
+    await expect(availabilityTour).toContainText("第 1 步，共 4 步");
+    await availabilityTour.getByRole("button", { name: "稍后再看" }).click();
+    await memberPage.reload();
+    await memberPage.waitForTimeout(700);
+    await expect(memberPage.locator(".tour-bubble")).toHaveCount(0);
+    await memberPage.evaluate(() => sessionStorage.clear());
+    await memberPage.reload();
+    await memberPage.getByRole("button", { name: "可用时间" }).click();
+    await expect(availabilityTour).toBeVisible();
+    await availabilityTour.getByRole("button", { name: "跳过本段" }).click();
     await memberPage.getByRole("button", { name: "添加学期" }).last().click();
     await memberPage.getByLabel("每周投入上限（小时）").fill("0.5");
     await expect(memberPage.getByRole("button", { name: "减少每周投入上限" })).toBeVisible();
@@ -164,6 +225,10 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
     }).toBe("2026-07-21");
 
     await page.getByRole("button", { name: "资料库" }).click();
+    const resourcesTour = page.locator('[data-tour-section="resources"]');
+    await expect(resourcesTour).toBeVisible();
+    await expect(resourcesTour).toContainText("第 1 步，共 3 步");
+    await resourcesTour.getByRole("button", { name: "跳过本段" }).click();
     await page.getByRole("button", { name: "上传文件" }).click();
     const resourceDialog = page.getByRole("dialog", { name: "上传文件" });
     await resourceDialog.getByLabel("资料名称").fill("实验报告.pdf");
@@ -296,7 +361,32 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
     const archivedTaskRow = projectSettings.locator(".lifecycle-list article").filter({ hasText: "待归档草稿" });
     await archivedTaskRow.getByRole("button", { name: "取消归档" }).click();
     await expect(projectSettings.getByText("暂无已归档任务")).toBeVisible();
+    await projectSettings.getByRole("button", { name: "使用引导" }).click();
+    const workspaceGuideRow = projectSettings.locator(".guide-section-list article").filter({ hasText: "甘特图工作区" });
+    await expect(workspaceGuideRow).toContainText("已完成");
     await projectSettings.getByRole("button", { name: "关闭" }).click();
+
+    await page.getByRole("button", { name: "收起侧边栏", exact: true }).click();
+    await page.getByRole("button", { name: "项目设置" }).click();
+    const replaySettings = page.getByRole("dialog", { name: "项目设置" });
+    await replaySettings.getByRole("button", { name: "使用引导" }).click();
+    const replayWorkspaceRow = replaySettings.locator(".guide-section-list article").filter({ hasText: "甘特图工作区" });
+    await replayWorkspaceRow.getByRole("button", { name: "回放" }).click();
+    const replayedWorkspaceTour = page.locator('[data-tour-section="workspace"]');
+    await expect(replayedWorkspaceTour).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
+    await expect(page.locator(".sidebar")).toHaveCSS("width", "220px");
+    await replayedWorkspaceTour.getByRole("button", { name: "跳过本段" }).click();
+    await expect(page.locator(".sidebar")).toHaveCSS("width", "68px");
+    await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
+    await page.getByRole("button", { name: "项目设置" }).click();
+    const resetSettings = page.getByRole("dialog", { name: "项目设置" });
+    await resetSettings.getByRole("button", { name: "使用引导" }).click();
+    await resetSettings.getByRole("button", { name: "重置全部进度" }).click();
+    await expect(resetSettings.locator(".guide-section-list article").filter({ hasText: "甘特图工作区" })).toContainText("未查看");
+    await resetSettings.getByRole("button", { name: "关闭" }).click();
+    await page.waitForTimeout(700);
+    await expect(page.locator(".tour-bubble")).toHaveCount(0);
     await expect(page.locator(".gantt-meta-row.row-task").filter({ hasText: "待归档草稿" })).toBeVisible();
 
     const finalScheduleResponse = await page.context().request.get(
@@ -308,6 +398,9 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
     expect(finalSchedule.tasks.find((task) => task.title === "模型复现实验")?.status).toBe("done");
 
     await page.getByRole("button", { name: "可用时间" }).click();
+    const leaderAvailabilityTour = page.locator('[data-tour-section="availability"]');
+    await expect(leaderAvailabilityTour).toBeVisible();
+    await leaderAvailabilityTour.getByRole("button", { name: "跳过本段" }).click();
     const emptyAvailability = page.locator(".availability-empty");
     await expect(emptyAvailability).toBeVisible();
     const emptyAvailabilityBox = await emptyAvailability.boundingBox();

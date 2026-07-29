@@ -149,13 +149,13 @@ export function ResourceLibrary({ projectId, online, invalidationVersion }: Reso
       <section className="resource-workarea">
         <header className="resource-heading">
           <div><h1>{trashMode ? "资料回收站" : "资料库"}</h1><span>共 {visibleResources.length} 项资源</span></div>
-          <div>
+          <div data-tour-id="resources-create">
             <button className="secondary-button" type="button" onClick={() => setShowTags(true)}><Tags size={16} />标签</button>
             <button className="secondary-button" type="button" onClick={() => setShowCreate("file")} disabled={!online || trashMode}><Upload size={16} />上传文件</button>
             <button className="primary-button" type="button" onClick={() => setShowCreate("markdown")} disabled={!online || trashMode}><FilePlus2 size={16} />新建 Markdown</button>
           </div>
         </header>
-        <div className="resource-filters">
+        <div className="resource-filters" data-tour-id="resources-filters">
           <label className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索资源名称" /></label>
           <label><Filter size={14} /><select value={phaseId} onChange={(event) => setPhaseId(event.target.value)}><option value="">阶段：全部</option>{schedule?.phases.map((phase) => <option key={phase.id} value={phase.id}>{phase.name}</option>)}</select></label>
           <label><select value={taskId} onChange={(event) => setTaskId(event.target.value)}><option value="">来源任务：全部</option>{schedule?.tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select></label>
@@ -164,7 +164,7 @@ export function ResourceLibrary({ projectId, online, invalidationVersion }: Reso
           <button className={`trash-toggle ${trashMode ? "active" : ""}`} type="button" onClick={() => setTrashMode((value) => !value)}><Trash2 size={15} />{trashMode ? "返回资料库" : "回收站"}</button>
         </div>
         {error ? <div className="inline-error">{error}</div> : null}
-        <div className="resource-table-wrap">
+        <div className="resource-table-wrap" data-tour-id="resources-table">
           <div className="resource-table-header"><span>资源名称</span><span>类型</span><span>阶段</span><span>来源任务</span><span>标签</span><span>当前版本</span><span>大小</span><span>更新时间</span></div>
           {loading ? <div className="table-loading"><LoaderCircle className="spin" size={20} />正在读取资料版本</div> : visibleResources.length === 0 ? <div className="table-empty"><FilePlus2 size={24} /><strong>{trashMode ? "回收站为空" : "还没有符合条件的资料"}</strong><span>{trashMode ? "删除的资料会保留 30 天。" : "上传文件或新建 Markdown 文档开始沉淀成果。"}</span></div> : visibleResources.map((resource) => {
             const version = resource.currentVersion;

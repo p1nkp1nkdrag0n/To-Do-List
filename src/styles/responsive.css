@@ -1,0 +1,156 @@
+@media (max-width: 1439px) {
+  .gantt-view,
+  .resource-view {
+    position: relative;
+  }
+
+  .detail-drawer,
+  .resource-drawer {
+    position: absolute;
+    z-index: 20;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 378px;
+    min-width: 378px;
+  }
+
+  .gantt-range-tools .date-navigator span,
+  .gantt-range-tools .toolbar-divider {
+    display: none;
+  }
+
+  .gantt-structure-tools > .secondary-button {
+    width: 34px;
+    min-width: 34px;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .gantt-range-tools {
+    gap: 5px;
+    padding: 0 8px;
+  }
+
+  .gantt-structure-tools {
+    gap: 5px;
+    padding: 0 8px;
+  }
+
+  .resource-filters {
+    gap: 5px;
+  }
+
+  .resource-filters select {
+    width: 104px;
+  }
+
+  .search-box {
+    width: 160px !important;
+  }
+}
+
+@media (max-width: 1240px) {
+  .app-shell {
+    padding: 10px;
+  }
+
+  .gantt-table {
+    grid-template-columns: 390px minmax(0, 1fr);
+  }
+
+  .gantt-meta-header,
+  .gantt-meta-row {
+    grid-template-columns: minmax(170px, 1fr) 82px 72px 46px;
+  }
+
+  .availability-heading > div:first-child > span {
+    display: none;
+  }
+}
+
+@media (max-width: 1099px) {
+  .app-shell {
+    display: none;
+  }
+
+  .desktop-required {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    align-content: center;
+    gap: 13px;
+    background: var(--app-bg);
+    color: var(--ink);
+    padding: 30px;
+    text-align: center;
+  }
+
+  .desktop-required h1 {
+    margin-top: 16px;
+    font-size: 20px;
+  }
+
+  .desktop-required p {
+    color: var(--muted);
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-page {
+    min-height: 540px;
+  }
+
+  .auth-panel {
+    width: min(420px, calc(100% - 24px));
+    max-height: calc(100vh - 24px);
+    padding: 28px 22px 30px;
+  }
+
+  .brand-lockup-auth {
+    margin-bottom: 20px;
+  }
+
+  .brand-lockup-auth .brand-wordmark {
+    font-size: 31px;
+  }
+
+  .auth-tabs {
+    margin-bottom: 16px;
+  }
+
+  .auth-input-shell {
+    height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --glass: var(--surface-raised);
+    --glass-strong: var(--surface-raised);
+    --glass-border: var(--line-strong);
+  }
+
+  .glass-panel,
+  .view-toolbar,
+  .detail-drawer,
+  .resource-drawer {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
