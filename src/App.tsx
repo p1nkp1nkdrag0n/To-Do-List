@@ -19,6 +19,7 @@ const ACTIVE_PROJECT_KEY = "yancheng.activeProject.v2";
 const GanttView = lazy(() => import("./features/gantt/GanttView").then((module) => ({ default: module.GanttView })));
 const ResourceLibrary = lazy(() => import("./features/resources/ResourceLibrary").then((module) => ({ default: module.ResourceLibrary })));
 const AvailabilityView = lazy(() => import("./features/availability/AvailabilityView").then((module) => ({ default: module.AvailabilityView })));
+const MeetingView = lazy(() => import("./features/meeting/MeetingView").then((module) => ({ default: module.MeetingView })));
 
 export default function App() {
   const appearance = useAppearance();
@@ -181,7 +182,14 @@ export default function App() {
         onLogout={() => void logout()}
       >
         <Suspense fallback={<div className="view-placeholder"><LoaderCircle className="spin" size={22} /><span>正在载入工作区</span></div>}>
-          {activeView === "gantt" ? (
+          {activeView === "meeting" ? (
+            <MeetingView
+              project={activeProject}
+              collaboration={collaboration}
+              online={online}
+              onJumpToGantt={() => setActiveView("gantt")}
+            />
+          ) : activeView === "gantt" ? (
             <GanttView
               project={activeProject}
               currentUserId={auth.user.id}

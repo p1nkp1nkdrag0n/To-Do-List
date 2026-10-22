@@ -16,6 +16,8 @@
  *   npm run seed:demo:v3 -- --reset    # 清掉本项目任务 + 三名成员可用时间后重建
  */
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 import bcrypt from "bcryptjs";
 
@@ -320,6 +322,13 @@ async function main(): Promise<void> {
       [...userIds.values()],
     );
     console.log(`- 已清空演示成员可用时间 ${removed.changes} 份`);
+    // 数据重建后，上一次的撤销记录就对不上了，必须一起清掉，
+    // 否则点「撤销」会拿旧方案去改新数据。
+    const lastPlanFile = path.join(path.dirname(config.dbPath), "meeting-last-plan.json");
+    if (fs.existsSync(lastPlanFile)) {
+      fs.rmSync(lastPlanFile);
+      console.log("- 已清除上一次的撤销记录（meeting-last-plan.json）");
+    }
   }
 
   // ---- 4. 可用时间 ------------------------------------------------------

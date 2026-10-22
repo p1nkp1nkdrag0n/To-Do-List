@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // 原子写入工具会留下隐藏的临时目录，watcher 碰到会 EBUSY 崩掉，直接忽略。
+    watch: {
+      ignored: ["**/.*.tmpdir/**", "**/*.tmp"],
+    },
     proxy: {
       "/api": "http://localhost:4000",
       "/ws": {

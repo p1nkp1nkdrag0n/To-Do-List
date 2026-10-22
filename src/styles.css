@@ -6,6 +6,7 @@
 @import "./styles/components.css" layer(components);
 @import "./styles/shell.css" layer(shell);
 @import "./styles/features.css" layer(features);
+@import "./styles/meeting.css" layer(features);
 @import "./styles/auth.css" layer(auth);
 @import "./styles/onboarding.css" layer(onboarding);
 @import "./styles/responsive.css" layer(responsive);

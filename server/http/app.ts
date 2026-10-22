@@ -16,6 +16,7 @@ import {
   createTrashRouter,
 } from "../modules/lifecycle/lifecycle-router.js";
 import { createProjectRouter } from "../modules/projects/project-router.js";
+import { createMeetingRouter } from "../meeting/meeting-router.js";
 import { createProjectWriteGuard } from "../modules/projects/project-write-guard.js";
 import { createResourceRouter } from "../modules/resources/resource-router.js";
 import { createScheduleRouter } from "../modules/schedule/schedule-router.js";
@@ -105,6 +106,7 @@ export function createV2App(
     requireAuth,
     createProjectInviteRedemptionRouter(runtime),
   );
+  app.use("/api/meeting", requireAuth, createMeetingRouter(runtime));
   if (options.staticPath !== undefined) {
     const staticPath = path.resolve(options.staticPath);
     app.use(express.static(staticPath, { index: "index.html" }));

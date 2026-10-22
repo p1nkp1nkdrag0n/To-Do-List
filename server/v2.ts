@@ -111,6 +111,8 @@ export async function startV2Server(
         ...appDependencies,
         publishEntityInvalidation: (projectId, entityType, entityId) =>
           collaborationHub?.publishEntityInvalidation(projectId, entityType, entityId),
+        publishMeetingEvent: (projectId, event) =>
+          collaborationHub?.publishMeetingEvent(projectId, event),
       },
       { staticPath },
     ),

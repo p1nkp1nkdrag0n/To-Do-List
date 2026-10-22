@@ -37,6 +37,8 @@ export interface ApplyResult {
   conflictsBefore: number;
   conflictsAfter: number;
   remainingConflictTypes: string[];
+  /** 拆分时真正落库的分工 id（占位 id → 真实 id），撤销要用。 */
+  createdParticipants: Array<{ placeholderId: string; realId: string; taskId: string; userId: string }>;
 }
 
 export function applyPlan(
@@ -56,9 +58,18 @@ export function applyPlan(
   }
 
   const applied: string[] = [];
+  const createdParticipants: ApplyResult["createdParticipants"] = [];
   for (const operation of plan.operations) {
     try {
-      applyOperation(runtime, projectId, operation);
+      const created = applyOperation(runtime, projectId, operation);
+      if (created !== undefined) {
+        createdParticipants.push({
+          placeholderId: operation.kind === "split" ? operation.newParticipantId : "",
+          realId: created.id,
+          taskId: operation.kind === "split" ? operation.taskId : "",
+          userId: operation.kind === "split" ? operation.toUserId : "",
+        });
+      }
     } catch (error) {
       // 防呆二：这一步不是原子的，失败时必须告诉调用方「改到哪一步了」，
       // 而不是让人以为什么都没发生。
@@ -78,6 +89,7 @@ export function applyPlan(
     conflictsBefore: plan.before.conflicts,
     conflictsAfter: conflictsAfter.length,
     remainingConflictTypes: [...new Set(conflictsAfter.map((conflict) => conflict.type))],
+    createdParticipants,
   };
 }
 
@@ -112,7 +124,7 @@ function applyOperation(
   runtime: McpRuntime,
   projectId: string,
   operation: PlanOperation,
-): void {
+): { id: string } | undefined {
   const schedule = runtime.schedule;
   const auth = runtime.auth;
 
@@ -125,7 +137,7 @@ function applyOperation(
           userId: operation.toUserId,
         });
       });
-      return;
+      return undefined;
     }
     case "split": {
       retry(() => {
@@ -135,16 +147,27 @@ function applyOperation(
           estimatedMinutes: Math.max(1, participant.estimatedMinutes - operation.moveMinutes),
         });
       });
-      retry(() => {
+      const added = retry(() => {
         const participant = findParticipant(runtime, projectId, operation.participantId);
+        // 撤销过一次之后再跑，同一对人会撞上「软删除的历史分工」，
+        // 服务层要求带它当前的 revision 才能复活，否则抛 REVISION_CONFLICT。
+        const historical = runtime.database.get<{ revision: number; removed_at: string | null }>(
+          `SELECT revision, removed_at FROM task_participants
+            WHERE task_id = ? AND user_id = ?`,
+          [participant.taskId, operation.toUserId],
+        );
         return schedule.addParticipant(auth, projectId, participant.taskId, {
+          expectedRevision:
+            historical !== undefined && historical.removed_at !== null
+              ? historical.revision
+              : undefined,
           userId: operation.toUserId,
           startDate: participant.startDate,
           endDate: participant.endDate,
           estimatedMinutes: operation.moveMinutes,
         });
       });
-      return;
+      return added.participant;
     }
     case "extend": {
       retry(() => {
@@ -164,7 +187,7 @@ function applyOperation(
           });
         });
       }
-      return;
+      return undefined;
     }
     case "shiftTask": {
       for (const taskId of operation.taskIds) {
@@ -190,7 +213,7 @@ function applyOperation(
           });
         }
       }
-      return;
+      return undefined;
     }
   }
 }
