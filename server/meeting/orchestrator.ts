@@ -15,6 +15,7 @@ import type {
   MeetingEventListener,
   MeetingRunResult,
 } from "./events.js";
+import { MeetingControl } from "./control.js";
 import { extractTasksFromText, type ExtractedTask } from "./extractor.js";
 
 export interface OrchestratorOptions {
@@ -31,6 +32,8 @@ export interface OrchestratorOptions {
    * 0 表示不停顿（测试用）。
    */
   paceMs?: number;
+  /** 演示暂停开关；暂停时会在检查点停下来等。 */
+  control?: MeetingControl;
 }
 
 interface PlanSummary {
@@ -90,6 +93,24 @@ export class MeetingOrchestrator {
 
   get eventLog(): MeetingEvent[] {
     return [...this.events];
+  }
+
+  private async waitIfPaused(): Promise<void> {
+    const control = this.options.control;
+    if (control === undefined || !control.isPaused) return;
+    this.emit({
+      type: "session.started",
+      at: new Date().toISOString(),
+      message: "已暂停，点「继续」接着跑",
+      detail: { paused: true },
+    });
+    await control.waitIfPaused();
+    this.emit({
+      type: "session.started",
+      at: new Date().toISOString(),
+      message: "已继续",
+      detail: { paused: false },
+    });
   }
 
   private async pause(): Promise<void> {
@@ -252,6 +273,7 @@ export class MeetingOrchestrator {
     });
     await this.pause();
 
+    await this.waitIfPaused();
     const planOutcome = await this.callTool(
       client,
       "plan_reschedule",
@@ -284,6 +306,7 @@ export class MeetingOrchestrator {
     });
 
     const chosen = plans.find((plan) => plan.feasible) ?? plans[0]!;
+    await this.waitIfPaused();
     await this.pause();
     const applyOutcome = await this.callTool(
       client,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowRight, FileText, LoaderCircle, Mic, RotateCcw, Settings2, Trash2, Upload } from "lucide-react";
+import { AlertCircle, ArrowRight, FileText, LoaderCircle, Mic, Pause, Play, RotateCcw, Settings2, Trash2, Upload } from "lucide-react";
 
 import type { CollaborationState } from "../../lib/collaboration-state";
 import { api, errorMessage } from "../../lib/api";
@@ -74,6 +74,9 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
   /** 右栏两页：平时看日志，发现冲突时自动切到「冲突与方案」。 */
   const [rightTab, setRightTab] = useState<"log" | "conflict">("log");
+  /** 手动暂停：录音回放和后台流水线都会停在原地。 */
+  const [paused, setPaused] = useState(false);
+  const pausedAtRef = useRef(0);
   /** 处理完成后自动跳甘特图的倒计时（秒）；null 表示不跳。 */
   const [jumpIn, setJumpIn] = useState<number | null>(null);
   const startedAtRef = useRef(0);
@@ -157,7 +160,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   // 转写回放：按「开始时间 + 进度」算该露几句，不依赖定时器次数，
   // 这样 StrictMode 双挂载也不会跑成两倍速。
   useEffect(() => {
-    if (phase !== "transcribing") return;
+    if (phase !== "transcribing" || paused) return;
     const tick = () => {
       const elapsed = Date.now() - startedAtRef.current;
       setRevealed(
@@ -167,11 +170,19 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     const timer = setInterval(tick, 120);
     tick();
     return () => clearInterval(timer);
-  }, [phase]);
+  }, [phase, paused]);
 
   const startProcessing = useCallback(async () => {
     setError("");
     setRun(undefined);
+    setRightTab("log");
+    setJumpIn(null);
+    setPaused(false);
+    try {
+      sessionStorage.removeItem(`${LAST_RUN_KEY}.${projectId}`);
+    } catch {
+      // 忽略
+    }
     setRevealed(0);
     extractedRef.current = false;
     startedAtRef.current = Date.now();
@@ -185,6 +196,29 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     ]);
     setPhase("transcribing");
   }, []);
+
+  const togglePause = useCallback(async () => {
+    if (paused) {
+      // 继续：把暂停期间的时间补回去，避免转写一下子跳好几行。
+      const pausedFor = pausedAtRef.current > 0 ? Date.now() - pausedAtRef.current : 0;
+      startedAtRef.current += pausedFor;
+      pausedAtRef.current = 0;
+      setPaused(false);
+      try {
+        await api.post("/api/meeting/control", { projectId, action: "resume" });
+      } catch {
+        // 后台已经跑完了，忽略。
+      }
+      return;
+    }
+    pausedAtRef.current = Date.now();
+    setPaused(true);
+    try {
+      await api.post("/api/meeting/control", { projectId, action: "pause" });
+    } catch {
+      // 没有正在运行的处理，暂停只作用于本地回放。
+    }
+  }, [paused, projectId]);
 
   const runPipeline = useCallback(async () => {
     setPhase("running");
@@ -208,6 +242,14 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     setInputMode("minutes");
     setError("");
     setRun(undefined);
+    setRightTab("log");
+    setJumpIn(null);
+    setPaused(false);
+    try {
+      sessionStorage.removeItem(`${LAST_RUN_KEY}.${projectId}`);
+    } catch {
+      // 忽略
+    }
     setRevealed(DEMO_TRANSCRIPT.length);
     setLocalEvents([
       {
@@ -297,14 +339,10 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     return [...localEvents, ...liveEvents];
   }, [run, localEvents, liveEvents]);
 
-  // 一旦出现冲突就切到第二页——包括还没跑完、只收到 ws 事件的时候。
-  const liveHasConflict = collaboration.meetingEvents.some(
-    (event) => event.type === "conflict.found",
-  );
+  // 等整轮跑完、日志都输出完了，再切到「冲突与方案」。
   useEffect(() => {
-    const hasConflict = (run !== undefined && run.conflictsBefore > 0) || liveHasConflict;
-    if (hasConflict) setRightTab("conflict");
-  }, [run, liveHasConflict]);
+    if (run !== undefined && run.conflictsBefore > 0) setRightTab("conflict");
+  }, [run]);
 
   const conflictEvent = run?.events.find((event) => event.type === "conflict.found");
   const planEvent = run?.events.find(
@@ -367,6 +405,12 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
           >
             <FileText size={15} /> 粘贴会议纪要
           </button>
+          {phase === "transcribing" || phase === "running" ? (
+            <button className="secondary-button" type="button" onClick={() => void togglePause()}>
+              {paused ? <Play size={15} /> : <Pause size={15} />}
+              {paused ? "继续" : "暂停"}
+            </button>
+          ) : null}
           <button
             className="secondary-button"
             type="button"

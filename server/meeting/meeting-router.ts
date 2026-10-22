@@ -19,6 +19,7 @@ import { AvailabilityService } from "../modules/availability/availability-servic
 import type { AuthLocals } from "../modules/auth/auth-router.js";
 import { MeetingOrchestrator } from "./orchestrator.js";
 
+import { MeetingControl } from "./control.js";
 import { clearProjectSchedule } from "./demo-reset.js";
 import { undoPlan } from "./undo.js";
 import type { AppliedPlanRecord } from "./events.js";
@@ -74,6 +75,8 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   const availability = new AvailabilityService(dependencies);
   /** 每个项目最近一次自动应用的方案，撤销时反推用。 */
   const lastApplied = loadLastApplied();
+  /** 正在运行的会议处理，按项目存一份暂停开关。 */
+  const controls = new Map<string, MeetingControl>();
 
   router.post(
     "/run",
@@ -88,8 +91,11 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
       }
 
+      const control = new MeetingControl();
+      controls.set(projectId, control);
       const orchestrator = new MeetingOrchestrator({
         projectId,
+        control,
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
         paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),
         onEvent(event) {
@@ -116,10 +122,15 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       });
 
       const trimmed = minutes?.trim() ?? "";
-      const result =
-        trimmed === ""
-          ? await orchestrator.run()
-          : await orchestrator.runFromMinutes(trimmed);
+      let result;
+      try {
+        result =
+          trimmed === ""
+            ? await orchestrator.run()
+            : await orchestrator.runFromMinutes(trimmed);
+      } finally {
+        controls.delete(projectId);
+      }
       if (result.appliedPlan !== null) {
         lastApplied.set(projectId, result.appliedPlan);
         saveLastApplied(lastApplied);
@@ -133,6 +144,30 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         durationMs: result.durationMs,
         events: result.events,
       });
+    },
+  );
+
+  /** 暂停 / 继续：只在会议处理跑到一半时有意义。 */
+  router.post(
+    "/control",
+    (request, response: Response<unknown, AuthLocals>) => {
+      const { projectId, action } = parseRequestBody(
+        z.object({ projectId: z.string().min(1), action: z.enum(["pause", "resume"]) }).strict(),
+        request,
+      );
+      const control = controls.get(projectId);
+      if (control === undefined) {
+        throw new HttpError(409, "NO_RUNNING_MEETING", "当前没有正在处理的会议。");
+      }
+      if (action === "pause") control.pause();
+      else control.resume();
+      dependencies.publishMeetingEvent?.(projectId, {
+        type: "session.started",
+        at: new Date().toISOString(),
+        message: action === "pause" ? "已请求暂停，将在下一个检查点停下" : "已恢复",
+        detail: { paused: action === "pause" },
+      });
+      response.json({ projectId, paused: control.isPaused });
     },
   );
 
