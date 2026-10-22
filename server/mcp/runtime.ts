@@ -15,6 +15,7 @@ import type { AuthenticatedSession } from "../modules/auth/auth-service.js";
 import { ProjectService } from "../modules/projects/project-service.js";
 import { ScheduleService } from "../modules/schedule/schedule-service.js";
 import { TeamService } from "../modules/team/team-service.js";
+import type { ReschedulePlan } from "./reschedule.js";
 
 interface UserRow extends Record<string, unknown> {
   id: string;
@@ -42,6 +43,8 @@ export interface McpRuntime {
   team: TeamService;
   /** 调用方没传 projectId 时用的默认项目。 */
   defaultProjectId: string | undefined;
+  /** plan_reschedule 算出的方案，apply_plan 按项目取用；进程内缓存，不落库。 */
+  planCache: Map<string, ReschedulePlan[]>;
   resolveProjectId(requested?: string): string;
   close(): void;
 }
@@ -128,6 +131,7 @@ export function createMcpRuntime(options: McpRuntimeOptions = {}): McpRuntime {
     projects,
     team: new TeamService(dependencies),
     defaultProjectId,
+    planCache: new Map<string, ReschedulePlan[]>(),
     resolveProjectId(requested?: string): string {
       const projectId = requested ?? defaultProjectId;
       if (projectId === undefined) {

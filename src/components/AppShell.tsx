@@ -6,6 +6,7 @@ import {
   FileArchive,
   GanttChartSquare,
   LogOut,
+  Mic,
   Monitor,
   Moon,
   PanelLeftClose,
@@ -22,7 +23,7 @@ import type { AppearanceController } from "../lib/useAppearance";
 import type { AuthState, Project, ProjectDetail } from "../types";
 import { BrandMark } from "./BrandMark";
 
-export type WorkspaceView = "gantt" | "resources" | "availability";
+export type WorkspaceView = "gantt" | "resources" | "availability" | "meeting";
 
 interface AppShellProps {
   auth: AuthState;
@@ -49,6 +50,7 @@ const navigation: Array<{
   icon: typeof GanttChartSquare;
 }> = [
   { id: "gantt", label: "甘特图", icon: GanttChartSquare },
+  { id: "meeting", label: "会议", icon: Mic },
   { id: "resources", label: "资料库", icon: FileArchive },
   { id: "availability", label: "可用时间", icon: CalendarClock },
 ];

@@ -41,6 +41,8 @@ function automaticSection(
   activeView: WorkspaceView,
 ): TourSection {
   if (!hasProject) return "project-setup";
+  // 会议页是后加的工作区，引导沿用 workspace 那一套，不单独开一段。
+  if (activeView === "meeting") return "workspace";
   return activeView === "gantt" ? "workspace" : activeView;
 }
 

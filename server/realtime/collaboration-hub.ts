@@ -75,6 +75,14 @@ export class CollaborationHub {
     this.broadcast(projectId, { type: "entity.invalidated", entityType, entityId });
   }
 
+  /** 会议编排的进度事件（日志面板用），与数据失效解耦。 */
+  publishMeetingEvent(
+    projectId: string,
+    event: { type: string; at: string; message: string; detail?: Record<string, unknown> },
+  ): void {
+    this.broadcast(projectId, { type: "meeting.event", event });
+  }
+
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;

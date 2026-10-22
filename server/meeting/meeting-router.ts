@@ -1,0 +1,194 @@
+/**
+ * 会议页的后端入口：一个 POST 就启动整条自动化链路。
+ *
+ *   POST /api/meeting/run  { projectId }
+ *
+ * 返回本次运行的事件流（同步等流程跑完，演示只有几秒）；
+ * 同时每个事件都会通过 ws 推给同一个项目的浏览器，前端据此滚动日志。
+ */
+import { Router, type Response } from "express";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { z } from "zod";
+
+import type { V2RuntimeDependencies } from "../http/dependencies.js";
+import { parseRequestBody } from "../http/routing.js";
+import { HttpError } from "../http/errors.js";
+import { AvailabilityService } from "../modules/availability/availability-service.js";
+import type { AuthLocals } from "../modules/auth/auth-router.js";
+import { MeetingOrchestrator } from "./orchestrator.js";
+
+import { undoPlan } from "./undo.js";
+import type { AppliedPlanRecord } from "./events.js";
+
+const RunMeetingRequestSchema = z
+  .object({
+    projectId: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * 撤销记录落一个小文件，服务重启后仍然可撤销。
+ * 放 data/ 下（已被 .gitignore 排除），不进数据库，免得为演示加迁移。
+ */
+const LAST_PLAN_FILE = path.join(process.cwd(), "data", "v2", "meeting-last-plan.json");
+
+function loadLastApplied(): Map<string, AppliedPlanRecord> {
+  try {
+    const raw = fs.readFileSync(LAST_PLAN_FILE, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, AppliedPlanRecord>;
+    return new Map(Object.entries(parsed));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveLastApplied(plans: Map<string, AppliedPlanRecord>): void {
+  try {
+    fs.mkdirSync(path.dirname(LAST_PLAN_FILE), { recursive: true });
+    fs.writeFileSync(LAST_PLAN_FILE, JSON.stringify(Object.fromEntries(plans), null, 2));
+  } catch {
+    // 落盘失败不影响主流程，最坏情况就是重启后不能撤销。
+  }
+}
+
+export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router {
+  const router = Router();
+  const availability = new AvailabilityService(dependencies);
+  /** 每个项目最近一次自动应用的方案，撤销时反推用。 */
+  const lastApplied = loadLastApplied();
+
+  router.post(
+    "/run",
+    async (request, response: Response<unknown, AuthLocals>) => {
+      const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+      const auth = response.locals.auth;
+
+      // 只有项目成员能触发；编排器本身用 MCP 的固定身份跑，但入口必须先过权限。
+      try {
+        availability.projectSummary(auth, projectId);
+      } catch {
+        throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+      }
+
+      const orchestrator = new MeetingOrchestrator({
+        projectId,
+        onEvent(event) {
+          dependencies.publishMeetingEvent?.(projectId, {
+            type: event.type,
+            at: event.at,
+            message: event.message,
+            detail:
+              event.type === "tool.call"
+                ? {
+                    tool: event.tool,
+                    status: event.status,
+                    argumentsSummary: event.argumentsSummary,
+                    resultSummary: event.resultSummary,
+                    durationMs: event.durationMs,
+                  }
+                : event.detail,
+          });
+        },
+        onDataChanged(changedProjectId) {
+          dependencies.publishEntityInvalidation?.(changedProjectId, "project", changedProjectId);
+          dependencies.publishEntityInvalidation?.(changedProjectId, "task", changedProjectId);
+        },
+      });
+
+      const result = await orchestrator.run();
+      if (result.appliedPlan !== null) {
+        lastApplied.set(projectId, result.appliedPlan);
+        saveLastApplied(lastApplied);
+      }
+      response.json({
+        projectId: result.projectId,
+        conflictsBefore: result.conflictsBefore,
+        conflictsAfter: result.conflictsAfter,
+        appliedPlanId: result.appliedPlanId,
+        undoAvailable: lastApplied.has(projectId),
+        durationMs: result.durationMs,
+        events: result.events,
+      });
+    },
+  );
+
+  /** 页面刷新后也要知道「有没有可撤销的调整」，所以单独给一个查询入口。 */
+  router.get(
+    "/status",
+    (request, response: Response<unknown, AuthLocals>) => {
+      const projectId = String(request.query.projectId ?? "");
+      if (projectId === "") {
+        throw new HttpError(400, "PROJECT_REQUIRED", "projectId 不能为空。");
+      }
+      const plan = lastApplied.get(projectId);
+      response.json({
+        projectId,
+        undoAvailable: plan !== undefined,
+        appliedPlanId: plan?.id ?? null,
+        appliedPlanLabel: plan?.label ?? null,
+      });
+    },
+  );
+
+  /** 撤销上一次自动应用 —— 人在环上的入口，不参与默认流程。 */
+  router.post(
+    "/undo",
+    (request, response: Response<unknown, AuthLocals>) => {
+      const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+      const plan = lastApplied.get(projectId);
+      if (plan === undefined) {
+        throw new HttpError(
+          409,
+          "NOTHING_TO_UNDO",
+          "没有可撤销的自动调整（进程重启后会丢失撤销记录）。",
+        );
+      }
+      const result = undoPlan(dependencies, response.locals.auth, projectId, plan);
+      lastApplied.delete(projectId);
+      saveLastApplied(lastApplied);
+      dependencies.publishEntityInvalidation?.(projectId, "project", projectId);
+      dependencies.publishEntityInvalidation?.(projectId, "task", projectId);
+      response.json(result);
+    },
+  );
+
+  /** 还原演示数据（现场保险）：本质上是跑一遍 seed 脚本 --reset。 */
+  router.post(
+    "/reset",
+    async (request, response: Response<unknown, AuthLocals>) => {
+      const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+      try {
+        availability.projectSummary(response.locals.auth, projectId);
+      } catch {
+        throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+      }
+
+      const child = spawn(
+        process.execPath,
+        ["--import", "tsx", "scripts/seed-demo-v3.ts", "--reset"],
+        { cwd: process.cwd(), env: process.env, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let output = "";
+      child.stdout.on("data", (chunk) => (output += String(chunk)));
+      child.stderr.on("data", (chunk) => (output += String(chunk)));
+      const code: number = await new Promise((resolve) => {
+        child.on("close", (exitCode) => resolve(exitCode ?? 1));
+      });
+
+      lastApplied.delete(projectId);
+      saveLastApplied(lastApplied);
+      dependencies.publishEntityInvalidation?.(projectId, "project", projectId);
+      dependencies.publishEntityInvalidation?.(projectId, "task", projectId);
+
+      response.json({
+        ok: code === 0,
+        exitCode: code,
+        tail: output.trim().split("\n").slice(-6),
+      });
+    },
+  );
+
+  return router;
+}
