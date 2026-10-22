@@ -90,6 +90,8 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
 
       const orchestrator = new MeetingOrchestrator({
         projectId,
+        // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
+        paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),
         onEvent(event) {
           dependencies.publishMeetingEvent?.(projectId, {
             type: event.type,

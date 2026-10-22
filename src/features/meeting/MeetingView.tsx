@@ -74,10 +74,30 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
   /** 右栏两页：平时看日志，发现冲突时自动切到「冲突与方案」。 */
   const [rightTab, setRightTab] = useState<"log" | "conflict">("log");
+  /** 处理完成后自动跳甘特图的倒计时（秒）；null 表示不跳。 */
+  const [jumpIn, setJumpIn] = useState<number | null>(null);
   const startedAtRef = useRef(0);
   const extractedRef = useRef(false);
   const jumpTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const projectId = project.project.id;
+
+  // 处理完成后自动跳甘特图：留 6 秒给人看冲突面板，也可以点「留在本页」取消。
+  useEffect(() => {
+    if (run === undefined || phase !== "done") return;
+    setJumpIn(6);
+    const timer = setInterval(() => {
+      setJumpIn((current) => {
+        if (current === null) return null;
+        if (current <= 1) {
+          clearInterval(timer);
+          onJumpToGantt();
+          return null;
+        }
+        return current - 1;
+      });
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [run, phase, onJumpToGantt]);
 
   // 切到甘特图再回来时，把上一次的运行结果恢复出来，别让冲突面板凭空消失。
   useEffect(() => {
@@ -277,10 +297,14 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     return [...localEvents, ...liveEvents];
   }, [run, localEvents, liveEvents]);
 
-  // 发现冲突就自动切到第二页；没有冲突就留在日志页。
+  // 一旦出现冲突就切到第二页——包括还没跑完、只收到 ws 事件的时候。
+  const liveHasConflict = collaboration.meetingEvents.some(
+    (event) => event.type === "conflict.found",
+  );
   useEffect(() => {
-    if (run !== undefined && run.conflictsBefore > 0) setRightTab("conflict");
-  }, [run]);
+    const hasConflict = (run !== undefined && run.conflictsBefore > 0) || liveHasConflict;
+    if (hasConflict) setRightTab("conflict");
+  }, [run, liveHasConflict]);
 
   const conflictEvent = run?.events.find((event) => event.type === "conflict.found");
   const planEvent = run?.events.find(
@@ -551,6 +575,18 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
                     应用方案 <code>{run.appliedPlanId ?? "无"}</code>，耗时{" "}
                     {(run.durationMs / 1000).toFixed(1)}s
                   </span>
+                  {jumpIn !== null ? (
+                    <span className="meeting-countdown">
+                      {jumpIn}s 后自动进入甘特图
+                      <button
+                        className="link-button"
+                        type="button"
+                        onClick={() => setJumpIn(null)}
+                      >
+                        留在本页
+                      </button>
+                    </span>
+                  ) : null}
                   <button className="primary-button" type="button" onClick={onJumpToGantt}>
                     查看甘特图 <ArrowRight size={14} />
                   </button>

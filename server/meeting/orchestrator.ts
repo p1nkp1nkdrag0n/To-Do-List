@@ -26,6 +26,11 @@ export interface OrchestratorOptions {
   onEvent?: MeetingEventListener;
   onDataChanged?: (projectId: string) => void;
   maxRounds?: number;
+  /**
+   * 演示节奏：在关键步骤之间停一下，让观众看得清「先红后绿」。
+   * 0 表示不停顿（测试用）。
+   */
+  paceMs?: number;
 }
 
 interface PlanSummary {
@@ -85,6 +90,11 @@ export class MeetingOrchestrator {
 
   get eventLog(): MeetingEvent[] {
     return [...this.events];
+  }
+
+  private async pause(): Promise<void> {
+    const ms = this.options.paceMs ?? 0;
+    if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private emit(event: MeetingEvent): void {
@@ -240,6 +250,7 @@ export class MeetingOrchestrator {
       at: new Date().toISOString(),
       message: "检测到红冲突 → 唤醒协调员",
     });
+    await this.pause();
 
     const planOutcome = await this.callTool(
       client,
@@ -273,6 +284,7 @@ export class MeetingOrchestrator {
     });
 
     const chosen = plans.find((plan) => plan.feasible) ?? plans[0]!;
+    await this.pause();
     const applyOutcome = await this.callTool(
       client,
       "apply_plan",
