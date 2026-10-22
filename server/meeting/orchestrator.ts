@@ -34,6 +34,8 @@ export interface OrchestratorOptions {
   paceMs?: number;
   /** 演示暂停开关；暂停时会在检查点停下来等。 */
   control?: MeetingControl;
+  /** 负责人不可替换：只允许延期 / 平移，不允许换人或拆分。 */
+  lockOwners?: boolean;
 }
 
 interface PlanSummary {
@@ -277,7 +279,7 @@ export class MeetingOrchestrator {
     const planOutcome = await this.callTool(
       client,
       "plan_reschedule",
-      { projectId },
+      { projectId, allowReassign: !this.options.lockOwners },
       (payload) => {
         const plans = (payload.plans as PlanSummary[]) ?? [];
         const feasible = plans.filter((plan) => plan.feasible);

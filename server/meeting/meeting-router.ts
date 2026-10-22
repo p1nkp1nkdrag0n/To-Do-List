@@ -35,6 +35,7 @@ const RunWithMinutesSchema = z
   .object({
     projectId: z.string().min(1),
     minutes: z.string().max(20_000).optional(),
+    lockOwners: z.boolean().optional(),
   })
   .strict();
 
@@ -81,7 +82,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/run",
     async (request, response: Response<unknown, AuthLocals>) => {
-      const { projectId, minutes } = parseRequestBody(RunWithMinutesSchema, request);
+      const { projectId, minutes, lockOwners } = parseRequestBody(RunWithMinutesSchema, request);
       const auth = response.locals.auth;
 
       // 只有项目成员能触发；编排器本身用 MCP 的固定身份跑，但入口必须先过权限。
@@ -98,6 +99,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         control,
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
         paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),
+        lockOwners: lockOwners ?? false,
         onEvent(event) {
           dependencies.publishMeetingEvent?.(projectId, {
             type: event.type,

@@ -70,6 +70,8 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [manualBusy, setManualBusy] = useState("");
   const [minutesOpen, setMinutesOpen] = useState(false);
   const [minutesText, setMinutesText] = useState("");
+  /** 负责人不可替换：勾上之后只允许延期 / 平移，不允许换人或拆分。 */
+  const [lockOwners, setLockOwners] = useState(false);
   /** 这一轮输入的是录音还是纪要，决定左侧正文怎么画。 */
   const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
   /** 右栏两页：平时看日志，发现冲突时自动切到「冲突与方案」。 */
@@ -263,6 +265,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       const result = await api.post<RunResponse>("/api/meeting/run", {
         projectId,
         minutes: trimmed,
+        lockOwners,
       });
       setRun(result);
       setUndoAvailable(result.undoAvailable ?? false);
@@ -272,7 +275,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       setError(errorMessage(caught));
       setPhase("failed");
     }
-  }, [minutesText, projectId]);
+  }, [lockOwners, minutesText, projectId]);
 
   /** 人工入口：把上一次自动调整退回去。 */
   const handleUndo = useCallback(async () => {
@@ -505,6 +508,14 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
               >
                 填入示例纪要
               </button>
+              <label className="meeting-modal-check">
+                <input
+                  type="checkbox"
+                  checked={lockOwners}
+                  onChange={(event) => setLockOwners(event.target.checked)}
+                />
+                锁定负责人（只延期，不换人）
+              </label>
               <span className="meeting-modal-hint">
                 会先用 DeepSeek 抽任务；没有 key 时自动退回规则解析。
               </span>
