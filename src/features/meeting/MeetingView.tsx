@@ -72,6 +72,8 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [minutesText, setMinutesText] = useState("");
   /** 负责人不可替换：勾上之后只允许延期 / 平移，不允许换人或拆分。 */
   const [lockOwners, setLockOwners] = useState(false);
+  const [minutesFileName, setMinutesFileName] = useState("");
+  const [uploadingMinutes, setUploadingMinutes] = useState(false);
   /** 这一轮输入的是录音还是纪要，决定左侧正文怎么画。 */
   const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
   /** 右栏两页：平时看日志，发现冲突时自动切到「冲突与方案」。 */
@@ -276,6 +278,36 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       setPhase("failed");
     }
   }, [lockOwners, minutesText, projectId]);
+
+  /** 上传纪要文件（txt / docx / pdf），后端抽成文字后填进输入框。 */
+  const uploadMinutesFile = useCallback(async (file: File) => {
+    setUploadingMinutes(true);
+    setError("");
+    try {
+      const response = await fetch("/api/meeting/minutes", {
+        method: "POST",
+        headers: {
+          "content-type": file.type || "application/octet-stream",
+          "x-filename": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      const payload = (await response.json()) as {
+        filename?: string;
+        text?: string;
+        error?: { message?: string };
+      };
+      if (!response.ok) {
+        throw new Error(payload.error?.message ?? `上传失败（HTTP ${response.status}）`);
+      }
+      setMinutesText(payload.text ?? "");
+      setMinutesFileName(payload.filename ?? file.name);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setUploadingMinutes(false);
+    }
+  }, []);
 
   /** 人工入口：把上一次自动调整退回去。 */
   const handleUndo = useCallback(async () => {
@@ -508,6 +540,21 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
               >
                 填入示例纪要
               </button>
+              <label className="link-button meeting-upload">
+                {uploadingMinutes ? "解析中…" : "上传文件（txt / docx / pdf）"}
+                <input
+                  type="file"
+                  accept=".txt,.md,.markdown,.docx,.pdf"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file !== undefined) void uploadMinutesFile(file);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              {minutesFileName !== "" ? (
+                <span className="meeting-file-name">{minutesFileName}</span>
+              ) : null}
               <label className="meeting-modal-check">
                 <input
                   type="checkbox"

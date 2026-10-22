@@ -19,7 +19,10 @@ import { AvailabilityService } from "../modules/availability/availability-servic
 import type { AuthLocals } from "../modules/auth/auth-router.js";
 import { MeetingOrchestrator } from "./orchestrator.js";
 
+import express from "express";
+
 import { MeetingControl } from "./control.js";
+import { parseMinutesFile } from "./minutes-file.js";
 import { clearProjectSchedule } from "./demo-reset.js";
 import { undoPlan } from "./undo.js";
 import type { AppliedPlanRecord } from "./events.js";
@@ -146,6 +149,30 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         durationMs: result.durationMs,
         events: result.events,
       });
+    },
+  );
+
+  /**
+   * 上传纪要文件（txt / docx / pdf），返回抽好的纯文本。
+   * 用一个原始 body + 文件名 header，避免引入 multipart 依赖。
+   */
+  router.post(
+    "/minutes",
+    express.raw({ type: "*/*", limit: "20mb" }),
+    async (request, response: Response<unknown, AuthLocals>) => {
+      const rawName = String(request.headers["x-filename"] ?? "minutes.txt");
+      let filename = rawName;
+      try {
+        filename = decodeURIComponent(rawName);
+      } catch {
+        // 文件名没编码过，按原样用。
+      }
+      const body = request.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        throw new HttpError(400, "EMPTY_FILE", "没有收到文件内容。");
+      }
+      const parsed = await parseMinutesFile(filename, body);
+      response.json({ filename: parsed.filename, chars: parsed.chars, text: parsed.text });
     },
   );
 

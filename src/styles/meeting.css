@@ -773,3 +773,20 @@
   width: 14px;
   height: 14px;
 }
+
+.meeting-upload {
+  cursor: pointer;
+}
+
+.meeting-upload input {
+  display: none;
+}
+
+.meeting-file-name {
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
