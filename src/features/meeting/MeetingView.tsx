@@ -72,6 +72,8 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [minutesText, setMinutesText] = useState("");
   /** 负责人不可替换：勾上之后只允许延期 / 平移，不允许换人或拆分。 */
   const [lockOwners, setLockOwners] = useState(false);
+  /** 从纪要建排期时默认先清空，避免同一份纪要跑两次叠出两倍任务。 */
+  const [replaceSchedule, setReplaceSchedule] = useState(true);
   const [minutesFileName, setMinutesFileName] = useState("");
   const [uploadingMinutes, setUploadingMinutes] = useState(false);
   /** 这一轮输入的是录音还是纪要，决定左侧正文怎么画。 */
@@ -268,6 +270,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
         projectId,
         minutes: trimmed,
         lockOwners,
+        replaceSchedule,
       });
       setRun(result);
       setUndoAvailable(result.undoAvailable ?? false);
@@ -277,7 +280,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       setError(errorMessage(caught));
       setPhase("failed");
     }
-  }, [lockOwners, minutesText, projectId]);
+  }, [lockOwners, minutesText, projectId, replaceSchedule]);
 
   /** 上传纪要文件（txt / docx / pdf），后端抽成文字后填进输入框。 */
   const uploadMinutesFile = useCallback(async (file: File) => {
@@ -562,6 +565,14 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
                   onChange={(event) => setLockOwners(event.target.checked)}
                 />
                 锁定负责人（只延期，不换人）
+              </label>
+              <label className="meeting-modal-check">
+                <input
+                  type="checkbox"
+                  checked={replaceSchedule}
+                  onChange={(event) => setReplaceSchedule(event.target.checked)}
+                />
+                先清空本项目排期
               </label>
               <span className="meeting-modal-hint">
                 会先用 DeepSeek 抽任务；没有 key 时自动退回规则解析。

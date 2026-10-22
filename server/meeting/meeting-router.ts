@@ -39,6 +39,7 @@ const RunWithMinutesSchema = z
     projectId: z.string().min(1),
     minutes: z.string().max(20_000).optional(),
     lockOwners: z.boolean().optional(),
+    replaceSchedule: z.boolean().optional(),
   })
   .strict();
 
@@ -85,7 +86,10 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/run",
     async (request, response: Response<unknown, AuthLocals>) => {
-      const { projectId, minutes, lockOwners } = parseRequestBody(RunWithMinutesSchema, request);
+      const { projectId, minutes, lockOwners, replaceSchedule } = parseRequestBody(
+        RunWithMinutesSchema,
+        request,
+      );
       const auth = response.locals.auth;
 
       // 只有项目成员能触发；编排器本身用 MCP 的固定身份跑，但入口必须先过权限。
@@ -127,6 +131,19 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       });
 
       const trimmed = minutes?.trim() ?? "";
+      let clearedTasks = 0;
+      if (trimmed !== "" && replaceSchedule === true) {
+        // 从纪要建排期＝重建，不是往旧排期上叠加。
+        clearedTasks = clearProjectSchedule(dependencies, projectId).removedTasks;
+        dependencies.publishMeetingEvent?.(projectId, {
+          type: "session.started",
+          at: new Date().toISOString(),
+          message:
+            clearedTasks > 0
+              ? `已清空原有排期（${clearedTasks} 个任务），按纪要重建`
+              : "当前排期为空，按纪要新建",
+        });
+      }
       let result;
       try {
         result =
@@ -145,6 +162,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         conflictsBefore: result.conflictsBefore,
         conflictsAfter: result.conflictsAfter,
         appliedPlanId: result.appliedPlanId,
+        clearedTasks,
         undoAvailable: lastApplied.has(projectId),
         durationMs: result.durationMs,
         events: result.events,
