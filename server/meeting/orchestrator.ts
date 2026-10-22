@@ -171,18 +171,67 @@ export class MeetingOrchestrator {
       return { conflictsBefore: 0, conflictsAfter: 0, appliedPlanId: null, appliedPlan: null };
     }
 
-    const conflictList =
-      (conflictsOutcome.payload.conflicts as Array<{ type: string; summary: string }>) ?? [];
+    // 前端要显示「需要 10h / 可用 4h / 差 6h」，光有中文 summary 不够，
+    // 这里补一次 get_tasks，把分工的工时和任务标题一起带进事件里。
+    const tasksOutcome = await this.callTool(
+      client,
+      "get_tasks",
+      { projectId },
+      (payload) => `${(payload.tasks as unknown[])?.length ?? 0} 个任务`,
+    );
+    const participantIndex = new Map<
+      string,
+      { displayName: string; taskTitle: string; estimatedHours: number }
+    >();
+    const taskTitles = new Map<string, string>();
+    for (const task of (tasksOutcome.payload.tasks as Array<{
+      id: string;
+      title: string;
+      assignees?: Array<{ participantId: string; displayName: string; estimatedHours: number }>;
+    }>) ?? []) {
+      taskTitles.set(task.id, task.title);
+      for (const assignee of task.assignees ?? []) {
+        participantIndex.set(assignee.participantId, {
+          displayName: assignee.displayName,
+          taskTitle: task.title,
+          estimatedHours: assignee.estimatedHours,
+        });
+      }
+    }
+
+    const conflictList = ((conflictsOutcome.payload.conflicts as Array<Record<string, unknown>>) ??
+      []).map((conflict) => {
+      const successorTitle =
+        typeof conflict.successorTaskId === "string"
+          ? taskTitles.get(conflict.successorTaskId)
+          : undefined;
+      const predecessorTitle =
+        typeof conflict.predecessorTaskId === "string"
+          ? taskTitles.get(conflict.predecessorTaskId)
+          : undefined;
+      const participantId = typeof conflict.participantId === "string" ? conflict.participantId : "";
+      const info = participantIndex.get(participantId);
+      if (info === undefined) {
+        return { ...conflict, successorTitle, predecessorTitle };
+      }
+      const shortfallHours = Number(conflict.unallocatedMinutes ?? 0) / 60;
+      return {
+        ...conflict,
+        displayName: info.displayName,
+        taskTitle: info.taskTitle,
+        estimatedHours: info.estimatedHours,
+        availableHours: Math.max(0, Number((info.estimatedHours - shortfallHours).toFixed(1))),
+        successorTitle,
+        predecessorTitle,
+      };
+    });
     this.emit({
       type: "conflict.found",
       at: new Date().toISOString(),
       message: `发现 ${conflictsBefore} 条红冲突`,
       detail: {
         count: conflictsBefore,
-        conflicts: conflictList.map((conflict) => ({
-          type: conflict.type,
-          summary: conflict.summary,
-        })),
+        conflicts: conflictList,
       },
     });
 

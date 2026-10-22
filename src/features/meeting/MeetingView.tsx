@@ -73,6 +73,8 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [minutesText, setMinutesText] = useState("");
   /** 这一轮输入的是录音还是纪要，决定左侧正文怎么画。 */
   const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
+  /** 右栏两页：平时看日志，发现冲突时自动切到「冲突与方案」。 */
+  const [rightTab, setRightTab] = useState<"log" | "conflict">("log");
   const startedAtRef = useRef(0);
   const extractedRef = useRef(false);
   const jumpTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
@@ -271,6 +273,28 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     if (run !== undefined) return run.events as unknown as MeetingEventView[];
     return [...localEvents, ...liveEvents];
   }, [run, localEvents, liveEvents]);
+
+  // 发现冲突就自动切到第二页；没有冲突就留在日志页。
+  useEffect(() => {
+    if (run !== undefined && run.conflictsBefore > 0) setRightTab("conflict");
+  }, [run]);
+
+  const conflictEvent = run?.events.find((event) => event.type === "conflict.found");
+  const planEvent = run?.events.find(
+    (event) => event.type === "plan.ready" && Array.isArray(event.detail?.plans),
+  );
+  const appliedEvent = run?.events.find((event) => event.type === "plan.applied");
+
+  const rawConflicts = (conflictEvent?.detail?.conflicts ?? []) as Array<
+    Record<string, unknown>
+  >;
+  const candidatePlans = (planEvent?.detail?.plans ?? []) as Array<{
+    id: string;
+    label: string;
+    feasible: boolean;
+    summary: string;
+    after: { conflicts: number; shortfallMinutes: number; slippageDays: number; operations: number };
+  }>;
 
   const conflictsBefore = run?.conflictsBefore ?? 2;
   const conflictsAfter = run?.conflictsAfter ?? 0;
@@ -548,10 +572,138 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
 
         <aside className="meeting-pane meeting-log">
           <div className="meeting-log-head">
-            <strong>协作日志</strong>
-            <span>{events.length} 条</span>
+            <div className="meeting-log-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightTab === "log"}
+                className={rightTab === "log" ? "on" : ""}
+                onClick={() => setRightTab("log")}
+              >
+                协作日志 <span>{events.length}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightTab === "conflict"}
+                className={rightTab === "conflict" ? "on" : ""}
+                onClick={() => setRightTab("conflict")}
+              >
+                冲突与方案
+                {conflictsBefore > 0 ? (
+                  <span className="meeting-tab-badge">{conflictsBefore}</span>
+                ) : null}
+              </button>
+            </div>
             <i className={collaboration.connected ? "online-dot" : "offline-dot"} />
           </div>
+          {rightTab === "conflict" ? (
+            <div className="meeting-log-body meeting-conflict-panel">
+              {rawConflicts.length === 0 ? (
+                <p className="meeting-log-empty">
+                  这次处理没有发现冲突。有冲突时这里会自动打开，并且写明「谁、哪件事、差多少」。
+                </p>
+              ) : (
+                <>
+                  {rawConflicts.map((conflict, index) => {
+                    const type = String(conflict.type ?? "");
+                    const shortfall = Number(conflict.unallocatedMinutes ?? 0) / 60;
+                    const estimated = Number(conflict.estimatedHours ?? 0);
+                    const available = Number(conflict.availableHours ?? 0);
+                    const title = String(conflict.taskTitle ?? "");
+                    const who = String(conflict.displayName ?? "");
+                    return (
+                      <article className="meeting-conflict-card" key={`${type}-${index}`}>
+                        <div className="cc-top">
+                          <span className="cc-tag">
+                            {type === "unallocated_effort"
+                              ? "工时排不下"
+                              : type === "dependency_inversion"
+                                ? "顺序倒了"
+                                : type === "overdue"
+                                  ? "已过期"
+                                  : "可用时间缺失"}
+                          </span>
+                        </div>
+                        {type === "unallocated_effort" ? (
+                          <>
+                            <h4>{who} · 「{title}」</h4>
+                            <div className="cc-numbers">
+                              <span>需要 <b>{estimated.toFixed(1)}h</b></span>
+                              <span>·</span>
+                              <span>本周可用 <b>{available.toFixed(1)}h</b></span>
+                              <span>·</span>
+                              <span className="cc-short">差 {shortfall.toFixed(1)}h</span>
+                            </div>
+                            <div className="cc-bar">
+                              <i className="avail" style={{ width: `${estimated > 0 ? (available / estimated) * 100 : 0}%` }} />
+                            </div>
+                            <div className="cc-legend">
+                              <span><i className="avail" />可用</span>
+                              <span><i className="need" />排不进去</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <h4>
+                              「{String(conflict.successorTitle ?? "后续任务")}」比它依赖的
+                              「{String(conflict.predecessorTitle ?? "前置任务")}」还早开始
+                            </h4>
+                            <div className="cc-numbers">
+                              <span>计划开始 <b>{String(conflict.successorStart ?? "?")}</b></span>
+                              <span>·</span>
+                              <span>前置完成 <b>{String(conflict.predecessorFinish ?? "?")}</b></span>
+                            </div>
+                          </>
+                        )}
+                      </article>
+                    );
+                  })}
+
+                  {candidatePlans.length > 0 ? (
+                    <>
+                      <div className="cc-divider">协调员的方案</div>
+                      {candidatePlans.map((plan) => {
+                        const applied = appliedEvent?.detail?.planId === plan.id;
+                        return (
+                          <article
+                            className={`meeting-plan-card ${applied ? "on" : ""}`}
+                            key={plan.id}
+                          >
+                            <div className="cc-top">
+                              <span className="cc-name">{plan.label}</span>
+                              {applied ? (
+                                <span className="cc-tag win">已应用</span>
+                              ) : plan.feasible ? (
+                                <span className="cc-tag">备选</span>
+                              ) : (
+                                <span className="cc-tag warn">不可行</span>
+                              )}
+                            </div>
+                            <p className="cc-summary">{plan.summary}</p>
+                            <div className="cc-metrics">
+                              <span className={plan.after.conflicts === 0 ? "good" : "bad"}>
+                                冲突 <b>{plan.after.conflicts}</b>
+                              </span>
+                              <span>延期 <b>{plan.after.slippageDays} 天</b></span>
+                              <span>动作 <b>{plan.after.operations}</b></span>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </>
+                  ) : null}
+
+                  {appliedEvent !== undefined ? (
+                    <div className="cc-applied">
+                      {String(appliedEvent.message)}
+                      {run !== undefined ? `（总耗时 ${(run.durationMs / 1000).toFixed(1)}s）` : ""}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          ) : (
           <div className="meeting-log-body">
             {events.length === 0 ? (
               <p className="meeting-log-empty">还没有日志。点「上传会议录音」后，这里会实时滚动。</p>
@@ -587,6 +739,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
               ))
             )}
           </div>
+          )}
         </aside>
       </div>
     </div>

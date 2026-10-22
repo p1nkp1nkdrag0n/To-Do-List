@@ -545,3 +545,217 @@
   line-height: 1.8;
   color: var(--ink);
 }
+
+/* ---------- 右栏两个标签页 ---------- */
+.meeting-log-tabs {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.meeting-log-tabs button {
+  border: none;
+  background: transparent;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.meeting-log-tabs button span {
+  font-size: 10.5px;
+  color: var(--subtle);
+}
+
+.meeting-log-tabs button.on {
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.meeting-tab-badge {
+  background: var(--red-soft);
+  color: #a3141c !important;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+/* ---------- 冲突与方案 ---------- */
+.meeting-conflict-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.meeting-conflict-card {
+  border: 1px solid #f3c9cb;
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: linear-gradient(180deg, #fff8f8, var(--surface));
+}
+
+.cc-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cc-tag {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #a3141c;
+  background: var(--red-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.cc-tag.win {
+  background: var(--green-soft);
+  color: #0c6f3c;
+}
+
+.cc-tag.warn {
+  background: var(--orange-soft);
+  color: #8a5a00;
+}
+
+.meeting-conflict-card h4 {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cc-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.cc-numbers b {
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.cc-short {
+  color: #a3141c;
+  font-weight: 700;
+}
+
+.cc-bar {
+  margin-top: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: #f0b6ba;
+  overflow: hidden;
+}
+
+.cc-bar i.avail {
+  display: block;
+  height: 100%;
+  background: #c9d3e0;
+}
+
+.cc-legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--subtle);
+}
+
+.cc-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+
+.cc-legend i.avail {
+  background: #c9d3e0;
+}
+
+.cc-legend i.need {
+  background: var(--red);
+}
+
+.cc-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtle);
+  font-size: 11px;
+  margin: 4px 0;
+}
+
+.cc-divider::before,
+.cc-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+
+.meeting-plan-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: var(--surface);
+}
+
+.meeting-plan-card.on {
+  border-color: #9fd9b6;
+  background: linear-gradient(180deg, #f4fcf7, var(--surface));
+  box-shadow: 0 6px 18px rgb(24 174 97 / 10%);
+}
+
+.cc-name {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.cc-summary {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #374151;
+}
+
+.cc-metrics {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cc-metrics b {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.cc-metrics .good b {
+  color: #0c6f3c;
+}
+
+.cc-metrics .bad b {
+  color: #a3141c;
+}
+
+.cc-applied {
+  border-radius: 10px;
+  background: var(--green-soft);
+  color: #0c6f3c;
+  font-size: 11.5px;
+  font-weight: 650;
+  padding: 9px 11px;
+  line-height: 1.5;
+}
