@@ -435,10 +435,16 @@ export class MeetingOrchestrator {
 
       // 3. 建任务 + 派人
       const created: Array<{ task: ExtractedTask; taskId: string }> = [];
+      let adjustedDates = 0;
       for (const task of extraction.tasks) {
         const userId = memberByName.get(task.ownerName);
         if (userId === undefined) continue;
-        const dueDate = task.dueDate ?? addDays(today, 7);
+        // 纪要里的日期可能是过去的（比如 4 月的会、写着「5.1 之前」）。
+        // 落库前统一挪到未来：过去的日期会让 startDate > dueDate，直接违反约束。
+        const rawDue = task.dueDate ?? null;
+        const dueDate =
+          rawDue === null || rawDue < today ? addDays(today, 7) : rawDue;
+        if (rawDue !== null && rawDue < today) adjustedDates += 1;
         const createdTask = await this.callTool(
           client,
           "create_task",
@@ -462,6 +468,18 @@ export class MeetingOrchestrator {
           (payload) => String(payload.summary ?? "已分配"),
         );
         created.push({ task, taskId });
+      }
+      if (adjustedDates > 0) {
+        this.emit({
+          type: "tool.call",
+          at: new Date().toISOString(),
+          tool: "normalize_dates",
+          status: "ok",
+          argumentsSummary: `${adjustedDates} 条日期已在过去`,
+          resultSummary: `已把它们顺延到今天 +7 天`,
+          durationMs: 0,
+          message: `有 ${adjustedDates} 条任务的日期已经过去，已顺延到本周内`,
+        });
       }
       this.options.onDataChanged?.(projectId);
 
