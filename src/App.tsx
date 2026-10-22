@@ -185,6 +185,7 @@ export default function App() {
           {activeView === "meeting" ? (
             <MeetingView
               project={activeProject}
+              currentUserId={auth.user.id}
               collaboration={collaboration}
               online={online}
               onJumpToGantt={() => setActiveView("gantt")}

@@ -37,6 +37,7 @@ interface RunResponse {
 
 interface MeetingViewProps {
   project: ProjectDetail;
+  currentUserId: string;
   collaboration: CollaborationState & { connected: boolean };
   online: boolean;
   onJumpToGantt: () => void;
@@ -51,14 +52,20 @@ const DEMO_MINUTES = `周会纪要
 邱业恒：会议录音脚本和话术我来写，四个钟头，这周末前。
 邱业恒：最后彩排和录屏我来，四个钟头，下周三之前。`;
 /** 运行结果按项目存在 sessionStorage 里，切到甘特图再回来不会丢。 */
-const LAST_RUN_KEY = "meeting.lastRun.v1";
+const LAST_RUN_KEY = "meeting.lastRun.v2";
 
 function clock(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? "--:--:--" : date.toISOString().slice(11, 19);
 }
 
-export function MeetingView({ project, collaboration, online, onJumpToGantt }: MeetingViewProps) {
+export function MeetingView({
+  project,
+  currentUserId,
+  collaboration,
+  online,
+  onJumpToGantt,
+}: MeetingViewProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [revealed, setRevealed] = useState(0);
   const [run, setRun] = useState<RunResponse>();
@@ -82,6 +89,8 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [rightTab, setRightTab] = useState<"log" | "conflict">("log");
   /** 手动暂停：录音回放和后台流水线都会停在原地。 */
   const [paused, setPaused] = useState(false);
+  /** 只有本轮刚跑完才自动跳甘特图；恢复出来的历史结果不跳。 */
+  const [freshRun, setFreshRun] = useState(false);
   const pausedAtRef = useRef(0);
   /** 处理完成后自动跳甘特图的倒计时（秒）；null 表示不跳。 */
   const [jumpIn, setJumpIn] = useState<number | null>(null);
@@ -92,7 +101,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
 
   // 处理完成后自动跳甘特图：留 6 秒给人看冲突面板，也可以点「留在本页」取消。
   useEffect(() => {
-    if (run === undefined || phase !== "done") return;
+    if (run === undefined || phase !== "done" || !freshRun) return;
     setJumpIn(6);
     const timer = setInterval(() => {
       setJumpIn((current) => {
@@ -106,7 +115,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       });
     }, 1_000);
     return () => clearInterval(timer);
-  }, [run, phase, onJumpToGantt]);
+  }, [freshRun, run, phase, onJumpToGantt]);
 
   // 切到甘特图再回来时，把上一次的运行结果恢复出来，别让冲突面板凭空消失。
   useEffect(() => {
@@ -115,7 +124,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     setRun(undefined);
     setError("");
     try {
-      const raw = sessionStorage.getItem(`${LAST_RUN_KEY}.${projectId}`);
+      const raw = sessionStorage.getItem(`${LAST_RUN_KEY}.${currentUserId}.${projectId}`);
       if (raw === null) return;
       const saved = JSON.parse(raw) as {
         run: RunResponse;
@@ -123,6 +132,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
         minutes: string;
       };
       setRun(saved.run);
+      setFreshRun(false);
       setInputMode(saved.inputMode);
       setMinutesText(saved.minutes ?? "");
       setRevealed(DEMO_TRANSCRIPT.length);
@@ -131,20 +141,20 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     } catch {
       // 存储被禁用或数据损坏时，当作没有历史。
     }
-  }, [projectId]);
+  }, [currentUserId, projectId]);
 
   const persistRun = useCallback(
     (result: RunResponse) => {
       try {
         sessionStorage.setItem(
-          `${LAST_RUN_KEY}.${projectId}`,
+          `${LAST_RUN_KEY}.${currentUserId}.${projectId}`,
           JSON.stringify({ run: result, inputMode, minutes: minutesText }),
         );
       } catch {
         // 存不下就算了，不影响主流程。
       }
     },
-    [inputMode, minutesText, projectId],
+    [currentUserId, inputMode, minutesText, projectId],
   );
 
   // 刷新页面后也要知道还能不能撤销，否则按钮会无端变灰。
@@ -161,7 +171,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [currentUserId, projectId]);
 
   // 转写回放：按「开始时间 + 进度」算该露几句，不依赖定时器次数，
   // 这样 StrictMode 双挂载也不会跑成两倍速。
@@ -231,6 +241,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     try {
       const result = await api.post<RunResponse>("/api/meeting/run", { projectId });
       setRun(result);
+      setFreshRun(true);
       setUndoAvailable(result.undoAvailable ?? false);
       setPhase("done");
       persistRun(result);
@@ -238,7 +249,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       setError(errorMessage(caught));
       setPhase("failed");
     }
-  }, [projectId]);
+  }, [currentUserId, projectId]);
 
   /** 从粘贴的会议纪要开始：抽任务 → 建库 → 排期 → 修复，全自动。 */
   const startFromMinutes = useCallback(async () => {
@@ -273,6 +284,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
         replaceSchedule,
       });
       setRun(result);
+      setFreshRun(true);
       setUndoAvailable(result.undoAvailable ?? false);
       setPhase("done");
       persistRun(result);
