@@ -458,3 +458,90 @@
     grid-template-columns: minmax(0, 1fr) 320px;
   }
 }
+
+/* ---------- 粘贴纪要弹层 ---------- */
+.meeting-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(18 28 42 / 38%);
+  backdrop-filter: blur(2px);
+}
+
+.meeting-modal {
+  width: min(720px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.meeting-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meeting-modal-head strong {
+  flex: 1;
+  font-size: 15px;
+}
+
+.meeting-modal textarea {
+  min-height: 260px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.meeting-modal textarea:focus {
+  outline: 2px solid var(--blue-soft);
+  border-color: var(--blue);
+}
+
+.meeting-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meeting-modal-hint {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--blue);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.meeting-minutes-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--ink);
+}

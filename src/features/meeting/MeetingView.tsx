@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowRight, LoaderCircle, Mic, RotateCcw, Settings2, Upload } from "lucide-react";
+import { AlertCircle, ArrowRight, FileText, LoaderCircle, Mic, RotateCcw, Settings2, Trash2, Upload } from "lucide-react";
 
 import type { CollaborationState } from "../../lib/collaboration-state";
 import { api, errorMessage } from "../../lib/api";
@@ -43,6 +43,13 @@ interface MeetingViewProps {
 }
 
 const LINE_INTERVAL_MS = 850;
+
+const DEMO_MINUTES = `周会纪要
+邱业恒：今天主要三件事，接口、甘特图、彩排。
+张工：MCP 工具层接口联调我来接，大概十个钟头，这周五之前搞定。我周三下午请假。
+李工：甘特图和冲突面板我来调，八个钟头，等张工接口好了我才能开始。
+邱业恒：会议录音脚本和话术我来写，四个钟头，这周末前。
+邱业恒：最后彩排和录屏我来，四个钟头，下周三之前。`;
 /** 处理完成 → 自动进甘特图的停顿；顺便用进度条把这个停顿「可视化」。 */
 const JUMP_DELAY_MS = 2_400;
 
@@ -62,6 +69,10 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [recordingName, setRecordingName] = useState("会议录音-60s（预置稿）");
   const [undoAvailable, setUndoAvailable] = useState(false);
   const [manualBusy, setManualBusy] = useState("");
+  const [minutesOpen, setMinutesOpen] = useState(false);
+  const [minutesText, setMinutesText] = useState("");
+  /** 这一轮输入的是录音还是纪要，决定左侧正文怎么画。 */
+  const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
   const startedAtRef = useRef(0);
   const extractedRef = useRef(false);
   const jumpTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
@@ -136,6 +147,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     setRevealed(0);
     extractedRef.current = false;
     startedAtRef.current = Date.now();
+    setInputMode("audio");
     setLocalEvents([
       {
         type: "session.started",
@@ -160,6 +172,39 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     }
   }, [projectId, startJumpCountdown]);
 
+  /** 从粘贴的会议纪要开始：抽任务 → 建库 → 排期 → 修复，全自动。 */
+  const startFromMinutes = useCallback(async () => {
+    const trimmed = minutesText.trim();
+    if (trimmed === "") return;
+    clearJumpTimer();
+    setMinutesOpen(false);
+    setInputMode("minutes");
+    setError("");
+    setRun(undefined);
+    setRevealed(DEMO_TRANSCRIPT.length);
+    setLocalEvents([
+      {
+        type: "session.started",
+        at: new Date().toISOString(),
+        message: `已收到会议纪要（${trimmed.length} 字），开始抽取待办`,
+      },
+    ]);
+    setPhase("running");
+    try {
+      const result = await api.post<RunResponse>("/api/meeting/run", {
+        projectId,
+        minutes: trimmed,
+      });
+      setRun(result);
+      setUndoAvailable(result.undoAvailable ?? false);
+      setPhase("done");
+      startJumpCountdown();
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setPhase("failed");
+    }
+  }, [clearJumpTimer, minutesText, projectId, startJumpCountdown]);
+
   /** 人工入口：把上一次自动调整退回去。 */
   const handleUndo = useCallback(async () => {
     clearJumpTimer();
@@ -182,17 +227,20 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   }, [clearJumpTimer, onJumpToGantt, projectId]);
 
   /** 人工入口：重跑 seed，回到 2 条冲突的开局。 */
-  const handleReset = useCallback(async () => {
-    clearJumpTimer();
-    setManualBusy("正在还原演示数据…");
-    try {
-      await api.post("/api/meeting/reset", { projectId });
-      window.location.reload();
-    } catch (caught) {
-      setManualBusy("");
-      setError(errorMessage(caught));
-    }
-  }, [clearJumpTimer, projectId]);
+  const handleReset = useCallback(
+    async (mode: "seed" | "empty" = "seed") => {
+      clearJumpTimer();
+      setManualBusy(mode === "empty" ? "正在清空任务…" : "正在还原演示数据…");
+      try {
+        await api.post("/api/meeting/reset", { projectId, mode });
+        window.location.reload();
+      } catch (caught) {
+        setManualBusy("");
+        setError(errorMessage(caught));
+      }
+    },
+    [clearJumpTimer, projectId],
+  );
 
   // 转写播完就自动进入处理，不需要再点。
   useEffect(() => {
@@ -263,6 +311,14 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
           <button
             className="secondary-button"
             type="button"
+            disabled={phase === "transcribing" || phase === "running"}
+            onClick={() => setMinutesOpen(true)}
+          >
+            <FileText size={15} /> 粘贴会议纪要
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
             aria-expanded={manualOpen}
             onClick={() => setManualOpen((current) => !current)}
           >
@@ -313,10 +369,65 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
             >
               <AlertCircle size={14} /> 还原演示数据
             </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={manualBusy !== ""}
+              title="只清空本项目任务，保留成员和可用时间，用来接会议纪要"
+              onClick={() => void handleReset("empty")}
+            >
+              <Trash2 size={14} /> 清空任务
+            </button>
             {manualBusy !== "" ? <span className="meeting-manual-status">{manualBusy}</span> : null}
           </div>
         ) : null}
       </header>
+
+      {minutesOpen ? (
+        <div className="meeting-modal-mask">
+          <div className="meeting-modal glass-panel" role="dialog" aria-modal="true">
+            <div className="meeting-modal-head">
+              <strong>粘贴会议纪要</strong>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="关闭"
+                onClick={() => setMinutesOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              value={minutesText}
+              placeholder="把会议纪要贴进来，例如：&#10;张工：MCP 接口联调，十个钟头，这周五前。&#10;李工：甘特图联调，八个钟头，等张工接口好了再开始。"
+              onChange={(event) => setMinutesText(event.target.value)}
+            />
+            <div className="meeting-modal-foot">
+              <button
+                className="link-button"
+                type="button"
+                onClick={() => setMinutesText(DEMO_MINUTES)}
+              >
+                填入示例纪要
+              </button>
+              <span className="meeting-modal-hint">
+                会先用 DeepSeek 抽任务；没有 key 时自动退回规则解析。
+              </span>
+              <button className="secondary-button" type="button" onClick={() => setMinutesOpen(false)}>
+                取消
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={minutesText.trim() === ""}
+                onClick={() => void startFromMinutes()}
+              >
+                开始处理
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="meeting-body">
         <section className="meeting-pane meeting-main">
@@ -332,26 +443,57 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
             </div>
           ) : (
             <>
-              <div className="meeting-transcript-head">
-                <span>会议正文</span>
-                <span className="meeting-timer">
-                  {Math.round((revealed / DEMO_TRANSCRIPT.length) * DEMO_AUDIO_SECONDS)}s / {DEMO_AUDIO_SECONDS}s
-                </span>
-                <span className="meeting-progress"><i style={{ width: `${progress}%` }} /></span>
-              </div>
-              <div className="meeting-transcript">
-                {DEMO_TRANSCRIPT.slice(0, revealed).map((line: TranscriptLine, index) => (
-                  <div className="meeting-line" key={`${line.atMs}-${index}`}>
-                    <div className="meeting-who">
-                      <b>{line.speaker}</b>
-                      <span>{Math.floor(line.atMs / 1000)}s</span>
-                    </div>
-                    <p>{line.text}</p>
+              {inputMode === "minutes" ? (
+                <>
+                  <div className="meeting-transcript-head">
+                    <span>会议纪要</span>
+                    <span className="meeting-timer">{minutesText.trim().length} 字</span>
+                    <span className="meeting-progress"><i style={{ width: "100%" }} /></span>
                   </div>
-                ))}
-              </div>
+                  <div className="meeting-transcript">
+                    <pre className="meeting-minutes-text">{minutesText.trim()}</pre>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="meeting-transcript-head">
+                    <span>会议正文</span>
+                    <span className="meeting-timer">
+                      {Math.round((revealed / DEMO_TRANSCRIPT.length) * DEMO_AUDIO_SECONDS)}s / {DEMO_AUDIO_SECONDS}s
+                    </span>
+                    <span className="meeting-progress"><i style={{ width: `${progress}%` }} /></span>
+                  </div>
+                  <div className="meeting-transcript">
+                    {DEMO_TRANSCRIPT.slice(0, revealed).map((line: TranscriptLine, index) => (
+                      <div className="meeting-line" key={`${line.atMs}-${index}`}>
+                        <div className="meeting-who">
+                          <b>{line.speaker}</b>
+                          <span>{Math.floor(line.atMs / 1000)}s</span>
+                        </div>
+                        <p>{line.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
 
-              {revealed >= DEMO_TRANSCRIPT.length ? (
+              {inputMode === "minutes" && run !== undefined ? (
+                <div className="meeting-cards">
+                  {(run.events
+                    .find((event) => event.type === "plan.ready" && Array.isArray(event.detail?.tasks))
+                    ?.detail?.tasks as Array<{ title: string; owner: string; hours: number }> | undefined
+                  )?.map((task, index) => (
+                    <article className="meeting-card" key={`${task.title}-${index}`}>
+                      <h3>{task.title}</h3>
+                      <div className="meeting-meta">
+                        <span>{task.owner}</span>
+                        <span>{task.hours}h</span>
+                        <span>来自纪要</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : revealed >= DEMO_TRANSCRIPT.length ? (
                 <div className="meeting-cards">
                   {DEMO_TASKS.map((task) => {
                     const broken =
