@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { parseConfig, type AppConfig } from "./config/env.js";
+import { loadEnvFile } from "./config/dotenv.js";
 import { openV2Database, type V2Database } from "./db/database.js";
 import { migrateV2Database } from "./db/migrations.js";
 import { createV2App } from "./http/app.js";
@@ -221,6 +222,7 @@ const entrypointUrl = process.argv[1]
   : undefined;
 
 if (entrypointUrl === import.meta.url) {
+  loadEnvFile();
   void startV2Server()
     .then((handle) => {
       console.log(`v2 API listening at ${handle.url}`);

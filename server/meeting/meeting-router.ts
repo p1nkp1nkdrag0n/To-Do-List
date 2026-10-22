@@ -19,12 +19,28 @@ import { AvailabilityService } from "../modules/availability/availability-servic
 import type { AuthLocals } from "../modules/auth/auth-router.js";
 import { MeetingOrchestrator } from "./orchestrator.js";
 
+import { clearProjectSchedule } from "./demo-reset.js";
 import { undoPlan } from "./undo.js";
 import type { AppliedPlanRecord } from "./events.js";
 
 const RunMeetingRequestSchema = z
   .object({
     projectId: z.string().min(1),
+  })
+  .strict();
+
+/** 纪要路径：带 minutes 就从纪要抽任务，不带就是老的「只修复」路径。 */
+const RunWithMinutesSchema = z
+  .object({
+    projectId: z.string().min(1),
+    minutes: z.string().max(20_000).optional(),
+  })
+  .strict();
+
+const ResetRequestSchema = z
+  .object({
+    projectId: z.string().min(1),
+    mode: z.enum(["seed", "empty"]).default("seed"),
   })
   .strict();
 
@@ -62,7 +78,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/run",
     async (request, response: Response<unknown, AuthLocals>) => {
-      const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+      const { projectId, minutes } = parseRequestBody(RunWithMinutesSchema, request);
       const auth = response.locals.auth;
 
       // 只有项目成员能触发；编排器本身用 MCP 的固定身份跑，但入口必须先过权限。
@@ -97,7 +113,11 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         },
       });
 
-      const result = await orchestrator.run();
+      const trimmed = minutes?.trim() ?? "";
+      const result =
+        trimmed === ""
+          ? await orchestrator.run()
+          : await orchestrator.runFromMinutes(trimmed);
       if (result.appliedPlan !== null) {
         lastApplied.set(projectId, result.appliedPlan);
         saveLastApplied(lastApplied);
@@ -158,11 +178,27 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/reset",
     async (request, response: Response<unknown, AuthLocals>) => {
-      const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+      const { projectId, mode } = parseRequestBody(ResetRequestSchema, request);
       try {
         availability.projectSummary(response.locals.auth, projectId);
       } catch {
         throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+      }
+
+      // 「清空任务」：只清本项目排期，成员和可用时间保留，用于接会议纪要。
+      if (mode === "empty") {
+        const cleared = clearProjectSchedule(dependencies, projectId);
+        lastApplied.delete(projectId);
+        saveLastApplied(lastApplied);
+        dependencies.publishEntityInvalidation?.(projectId, "project", projectId);
+        dependencies.publishEntityInvalidation?.(projectId, "task", projectId);
+        response.json({
+          ok: true,
+          mode,
+          removedTasks: cleared.removedTasks,
+          tail: [`已清空 ${cleared.removedTasks} 个任务`],
+        });
+        return;
       }
 
       const child = spawn(

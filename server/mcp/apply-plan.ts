@@ -59,15 +59,25 @@ export function applyPlan(
 
   const applied: string[] = [];
   const createdParticipants: ApplyResult["createdParticipants"] = [];
-  for (const operation of plan.operations) {
+  // 方案里的「拆分」会给新分工起一个占位 id，后续动作可能又要对它再拆一次。
+  // 维护占位 id → 真实 id 的映射，落库时先翻译再执行。
+  const placeholderToReal = new Map<string, string>();
+
+  for (const rawOperation of plan.operations) {
+    const operation: PlanOperation =
+      "participantId" in rawOperation && placeholderToReal.has(rawOperation.participantId)
+        ? { ...rawOperation, participantId: placeholderToReal.get(rawOperation.participantId)! }
+        : rawOperation;
+
     try {
       const created = applyOperation(runtime, projectId, operation);
-      if (created !== undefined) {
+      if (created !== undefined && rawOperation.kind === "split") {
+        placeholderToReal.set(rawOperation.newParticipantId, created.id);
         createdParticipants.push({
-          placeholderId: operation.kind === "split" ? operation.newParticipantId : "",
+          placeholderId: rawOperation.newParticipantId,
           realId: created.id,
-          taskId: operation.kind === "split" ? operation.taskId : "",
-          userId: operation.kind === "split" ? operation.toUserId : "",
+          taskId: rawOperation.taskId,
+          userId: rawOperation.toUserId,
         });
       }
     } catch (error) {
