@@ -313,13 +313,24 @@ afterEach(async () => {
 });
 
 describe("MCP 只读工具", () => {
-  it("tools/list 暴露 5 个只读工具", async () => {
+  it("tools/list 暴露全部 10 个工具", async () => {
     const fixture = makeFixture();
     const { client } = await connectTo(fixture);
 
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name).sort()).toEqual(
-      ["check_conflicts", "get_availability", "get_tasks", "list_members", "list_projects"].sort(),
+      [
+        "apply_plan",
+        "assign_member",
+        "check_conflicts",
+        "create_task",
+        "get_availability",
+        "get_tasks",
+        "list_members",
+        "list_projects",
+        "plan_reschedule",
+        "set_dependency",
+      ].sort(),
     );
     for (const tool of listed.tools) {
       expect(tool.description ?? "").not.toBe("");

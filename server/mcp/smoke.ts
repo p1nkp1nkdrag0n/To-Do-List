@@ -3,8 +3,8 @@
  *
  *   npm run mcp:smoke
  *
- * 覆盖：握手 → tools/list → get_tasks → list_members → check_conflicts。
- * 退出码 0 表示五项全过。
+ * 覆盖：握手 → tools/list → get_tasks → list_members → check_conflicts → plan_reschedule。
+ * 退出码 0 表示全部通过。
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -15,6 +15,8 @@ const EXPECTED_TOOLS = [
   "list_members",
   "get_availability",
   "check_conflicts",
+  "plan_reschedule",
+  "apply_plan",
 ];
 
 interface CallResult {
@@ -95,6 +97,17 @@ async function main(): Promise<void> {
       types.includes("unallocated_effort") &&
       types.includes("dependency_inversion"),
     detail: conflictList.map((conflict) => conflict.summary).join(" ｜ "),
+  });
+
+  const plans = parsePayload(
+    await client.callTool({ name: "plan_reschedule", arguments: {} }),
+  );
+  const planList =
+    (plans.plans as Array<{ id: string; feasible: boolean; after: { conflicts: number } }>) ?? [];
+  checks.push({
+    name: "plan_reschedule",
+    passed: planList.some((plan) => plan.feasible && plan.after.conflicts === 0),
+    detail: `${planList.length} 个方案，推荐 ${String(plans.recommendation)}`,
   });
 
   console.log("\n=== MCP 冒烟结果 ===");
