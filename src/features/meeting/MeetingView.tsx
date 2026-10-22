@@ -50,8 +50,8 @@ const DEMO_MINUTES = `周会纪要
 李工：甘特图和冲突面板我来调，八个钟头，等张工接口好了我才能开始。
 邱业恒：会议录音脚本和话术我来写，四个钟头，这周末前。
 邱业恒：最后彩排和录屏我来，四个钟头，下周三之前。`;
-/** 处理完成 → 自动进甘特图的停顿；顺便用进度条把这个停顿「可视化」。 */
-const JUMP_DELAY_MS = 2_400;
+/** 运行结果按项目存在 sessionStorage 里，切到甘特图再回来不会丢。 */
+const LAST_RUN_KEY = "meeting.lastRun.v1";
 
 function clock(iso: string): string {
   const date = new Date(iso);
@@ -65,7 +65,6 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const [localEvents, setLocalEvents] = useState<MeetingEventView[]>([]);
   const [error, setError] = useState("");
   const [manualOpen, setManualOpen] = useState(false);
-  const [jumpProgress, setJumpProgress] = useState(0);
   const [recordingName, setRecordingName] = useState("会议录音-60s（预置稿）");
   const [undoAvailable, setUndoAvailable] = useState(false);
   const [manualBusy, setManualBusy] = useState("");
@@ -80,12 +79,44 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
   const jumpTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const projectId = project.project.id;
 
+  // 切到甘特图再回来时，把上一次的运行结果恢复出来，别让冲突面板凭空消失。
   useEffect(() => {
     setPhase("idle");
     setRevealed(0);
     setRun(undefined);
     setError("");
+    try {
+      const raw = sessionStorage.getItem(`${LAST_RUN_KEY}.${projectId}`);
+      if (raw === null) return;
+      const saved = JSON.parse(raw) as {
+        run: RunResponse;
+        inputMode: "audio" | "minutes";
+        minutes: string;
+      };
+      setRun(saved.run);
+      setInputMode(saved.inputMode);
+      setMinutesText(saved.minutes ?? "");
+      setRevealed(DEMO_TRANSCRIPT.length);
+      setPhase("done");
+      setUndoAvailable(saved.run.undoAvailable ?? false);
+    } catch {
+      // 存储被禁用或数据损坏时，当作没有历史。
+    }
   }, [projectId]);
+
+  const persistRun = useCallback(
+    (result: RunResponse) => {
+      try {
+        sessionStorage.setItem(
+          `${LAST_RUN_KEY}.${projectId}`,
+          JSON.stringify({ run: result, inputMode, minutes: minutesText }),
+        );
+      } catch {
+        // 存不下就算了，不影响主流程。
+      }
+    },
+    [inputMode, minutesText, projectId],
+  );
 
   // 刷新页面后也要知道还能不能撤销，否则按钮会无端变灰。
   useEffect(() => {
@@ -118,32 +149,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
     return () => clearInterval(timer);
   }, [phase]);
 
-  const clearJumpTimer = useCallback(() => {
-    if (jumpTimerRef.current !== undefined) {
-      clearInterval(jumpTimerRef.current);
-      jumpTimerRef.current = undefined;
-    }
-  }, []);
-
-  const startJumpCountdown = useCallback(() => {
-    clearJumpTimer();
-    setJumpProgress(0);
-    const startedAt = Date.now();
-    jumpTimerRef.current = setInterval(() => {
-      const percent = Math.min(100, ((Date.now() - startedAt) / JUMP_DELAY_MS) * 100);
-      setJumpProgress(percent);
-      if (percent >= 100) {
-        clearJumpTimer();
-        onJumpToGantt();
-      }
-    }, 50);
-  }, [clearJumpTimer, onJumpToGantt]);
-
-  useEffect(() => clearJumpTimer, [clearJumpTimer]);
-
   const startProcessing = useCallback(async () => {
-    clearJumpTimer();
-    setJumpProgress(0);
     setError("");
     setRun(undefined);
     setRevealed(0);
@@ -158,7 +164,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       },
     ]);
     setPhase("transcribing");
-  }, [clearJumpTimer]);
+  }, []);
 
   const runPipeline = useCallback(async () => {
     setPhase("running");
@@ -167,18 +173,17 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       setRun(result);
       setUndoAvailable(result.undoAvailable ?? false);
       setPhase("done");
-      startJumpCountdown();
+      persistRun(result);
     } catch (caught) {
       setError(errorMessage(caught));
       setPhase("failed");
     }
-  }, [projectId, startJumpCountdown]);
+  }, [projectId]);
 
   /** 从粘贴的会议纪要开始：抽任务 → 建库 → 排期 → 修复，全自动。 */
   const startFromMinutes = useCallback(async () => {
     const trimmed = minutesText.trim();
     if (trimmed === "") return;
-    clearJumpTimer();
     setMinutesOpen(false);
     setInputMode("minutes");
     setError("");
@@ -200,16 +205,15 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       setRun(result);
       setUndoAvailable(result.undoAvailable ?? false);
       setPhase("done");
-      startJumpCountdown();
+      persistRun(result);
     } catch (caught) {
       setError(errorMessage(caught));
       setPhase("failed");
     }
-  }, [clearJumpTimer, minutesText, projectId, startJumpCountdown]);
+  }, [minutesText, projectId]);
 
   /** 人工入口：把上一次自动调整退回去。 */
   const handleUndo = useCallback(async () => {
-    clearJumpTimer();
     setManualBusy("正在撤销…");
     try {
       const result = await api.post<{ reverted: number; skipped: string[] }>(
@@ -226,12 +230,11 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
       setManualBusy("");
       setError(errorMessage(caught));
     }
-  }, [clearJumpTimer, onJumpToGantt, projectId]);
+  }, [onJumpToGantt, projectId]);
 
   /** 人工入口：重跑 seed，回到 2 条冲突的开局。 */
   const handleReset = useCallback(
     async (mode: "seed" | "empty" = "seed") => {
-      clearJumpTimer();
       setManualBusy(mode === "empty" ? "正在清空任务…" : "正在还原演示数据…");
       try {
         await api.post("/api/meeting/reset", { projectId, mode });
@@ -241,7 +244,7 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
         setError(errorMessage(caught));
       }
     },
-    [clearJumpTimer, projectId],
+    [projectId],
   );
 
   // 转写播完就自动进入处理，不需要再点。
@@ -548,19 +551,8 @@ export function MeetingView({ project, collaboration, online, onJumpToGantt }: M
                     应用方案 <code>{run.appliedPlanId ?? "无"}</code>，耗时{" "}
                     {(run.durationMs / 1000).toFixed(1)}s
                   </span>
-                  <span className="meeting-countdown">
-                    {Math.max(0, Math.ceil((JUMP_DELAY_MS * (1 - jumpProgress / 100)) / 1000))}s 后进入甘特图
-                    <i><b style={{ width: `${jumpProgress}%` }} /></i>
-                  </span>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => {
-                      clearJumpTimer();
-                      onJumpToGantt();
-                    }}
-                  >
-                    立即查看 <ArrowRight size={14} />
+                  <button className="primary-button" type="button" onClick={onJumpToGantt}>
+                    查看甘特图 <ArrowRight size={14} />
                   </button>
                 </div>
               ) : null}
