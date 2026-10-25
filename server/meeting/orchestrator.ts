@@ -430,9 +430,15 @@ export class MeetingOrchestrator {
             : `抽出 ${extraction.tasks.length} 条待办（${extraction.source === "deepseek" ? "大模型" : "规则"}）`,
       });
       if (extraction.tasks.length === 0) {
-        throw new Error(
-          `没能从这段纪要里抽出任务。${extraction.warnings.join("；")}`,
-        );
+        const noKey = extraction.warnings.some((w) => w.includes("没有配置"));
+        const hints = [
+          noKey
+            ? "当前没有配置大模型 Key，只能用规则解析，规则只认「谁 + 做什么 + 几小时」。"
+            : "",
+          "建议在纪要里把「谁负责什么、要多久、什么时候前完成」写清楚，再试一次。",
+          ...extraction.warnings,
+        ].filter((line) => line !== "");
+        throw new Error(`没能从这段纪要里抽出任务。\n${hints.join("\n")}`);
       }
 
       // 3. 建任务 + 派人

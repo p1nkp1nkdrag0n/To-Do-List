@@ -40,7 +40,7 @@ const SYSTEM_PROMPT = [
   "请抽出所有需要人去做的工作项，输出严格 JSON。",
   "要求：",
   "1. 每个任务一句话，不超过 20 个汉字，动词开头，例如「完成接口联调」。",
-  "2. ownerName 必须是给定成员名单里的名字原样，不能编造。",
+  "2. ownerName 照纪要原文写；如果这个人不在成员名单里，也照原样写，不要替换成名单里的其他人。",
   "3. estimatedHours 用数字，单位小时；没说工时就按同类任务估一个合理值（4~8）。",
   "4. dueDate 必须是 YYYY-MM-DD；根据今天的日期和纪要里的「这周」「下周三」「周末」等说法换算。",
   "5. dependsOnTitle 只有明确说「等谁做完我才能开始」时才填，值必须是另一个任务的 title。",
@@ -138,20 +138,26 @@ export async function extractTasksFromText(
         schema: ExtractionSchema,
       });
       const parsed = result.value as z.infer<typeof ExtractionSchema>;
-      const unknownOwners = parsed.tasks.filter((task) => !memberNames.includes(task.ownerName));
-      if (unknownOwners.length > 0) {
+      const unknown = parsed.tasks.filter((task) => !memberNames.includes(task.ownerName));
+      const valid = parsed.tasks.filter((task) => memberNames.includes(task.ownerName));
+      if (unknown.length > 0) {
+        const names = [...new Set(unknown.map((task) => task.ownerName))].join("、");
         warnings.push(
-          `模型给了不在名单里的负责人：${unknownOwners.map((task) => task.ownerName).join("、")}`,
+          `${names} 不在项目成员里，相关 ${unknown.length} 条任务已跳过；需要的话先把他们加进项目再重试。`,
         );
       }
-      const valid = parsed.tasks.filter((task) => memberNames.includes(task.ownerName));
       if (valid.length > 0) {
         return { tasks: valid, source: "deepseek", warnings };
       }
-      warnings.push("模型抽出的任务负责人全部不在成员名单里，改用规则解析。");
+      warnings.push("大模型抽出的任务负责人都不在成员名单里。");
     } catch (error) {
+      // 技术细节只进终端，给用户看的是人话。
+      console.error("[extractor] 大模型抽取失败：", error);
+      const message = error instanceof Error ? error.message : String(error);
       warnings.push(
-        `大模型抽取失败，已回退到规则解析：${error instanceof Error ? error.message : String(error)}`,
+        message.includes("密钥") || message.includes("网络") || message.includes("超时")
+          ? `大模型暂时不可用（${message}），已回退到规则解析。`
+          : "大模型没有从这段纪要里识别出任务，已回退到规则解析。",
       );
     }
   } else {

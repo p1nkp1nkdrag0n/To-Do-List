@@ -22,6 +22,13 @@ import { MeetingOrchestrator } from "./orchestrator.js";
 import express from "express";
 
 import { MeetingControl } from "./control.js";
+import { chatJson } from "./llm.js";
+import {
+  clearLlmConfigFile,
+  llmConfigView,
+  readLlmConfigFile,
+  writeLlmConfigFile,
+} from "./llm-config.js";
 import { parseMinutesFile } from "./minutes-file.js";
 import { clearProjectSchedule } from "./demo-reset.js";
 import { undoPlan } from "./undo.js";
@@ -193,6 +200,85 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       response.json({ filename: parsed.filename, chars: parsed.chars, text: parsed.text });
     },
   );
+
+  /** 读当前大模型配置（key 只回显末四位）。 */
+  router.get("/llm-config", (_request, response) => {
+    response.json(llmConfigView());
+  });
+
+  /** 保存配置。apiKey 留空表示沿用已有的。 */
+  router.put(
+    "/llm-config",
+    (request, response) => {
+      const input = parseRequestBody(
+        z
+          .object({
+            provider: z.string().min(1).max(40),
+            baseUrl: z.string().url(),
+            model: z.string().min(1).max(80),
+            apiKey: z.string().max(200).optional(),
+          })
+          .strict(),
+        request,
+      );
+      const existing = readLlmConfigFile();
+      const apiKey = input.apiKey !== undefined && input.apiKey.trim() !== ""
+        ? input.apiKey.trim()
+        : existing?.apiKey;
+      if (apiKey === undefined) {
+        throw new HttpError(400, "API_KEY_REQUIRED", "第一次保存需要填写 API Key。");
+      }
+      writeLlmConfigFile({
+        provider: input.provider,
+        baseUrl: input.baseUrl.replace(/\/$/, ""),
+        model: input.model,
+        apiKey,
+      });
+      response.json(llmConfigView());
+    },
+  );
+
+  /** 清掉本地配置（环境变量不受影响）。 */
+  router.delete("/llm-config", (_request, response) => {
+    clearLlmConfigFile();
+    response.json(llmConfigView());
+  });
+
+  /** 用当前配置发一次最小请求，验证 key 是否可用。 */
+  router.post("/llm-config/test", async (_request, response) => {
+    const view = llmConfigView();
+    if (!view.hasKey) {
+      throw new HttpError(400, "NO_LLM_CONFIG", "还没有配置大模型 Key。");
+    }
+    const config = {
+      apiKey: "",
+      baseUrl: view.baseUrl,
+      model: view.model,
+      provider: view.provider,
+    };
+    // 真实 key 只在内部取一次，不经过返回值。
+    const file = readLlmConfigFile();
+    config.apiKey =
+      process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? file?.apiKey ?? "";
+
+    try {
+      const started = Date.now();
+      await chatJson({
+        config,
+        system: "你是一个连通性测试助手，只输出 JSON。",
+        user: '返回 {"ok": true}',
+        schema: z.object({ ok: z.boolean() }),
+        timeoutMs: 15_000,
+      });
+      response.json({ ok: true, latencyMs: Date.now() - started, model: view.model });
+    } catch (error) {
+      throw new HttpError(
+        400,
+        "LLM_TEST_FAILED",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  });
 
   /** 暂停 / 继续：只在会议处理跑到一半时有意义。 */
   router.post(

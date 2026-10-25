@@ -35,6 +35,15 @@ interface RunResponse {
   events: MeetingEventView[];
 }
 
+interface LlmConfigView {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  hasKey: boolean;
+  keyHint: string;
+  source: "env" | "file" | "none";
+}
+
 interface MeetingViewProps {
   project: ProjectDetail;
   currentUserId: string;
@@ -83,6 +92,11 @@ export function MeetingView({
   const [replaceSchedule, setReplaceSchedule] = useState(true);
   const [minutesFileName, setMinutesFileName] = useState("");
   const [uploadingMinutes, setUploadingMinutes] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [llmConfig, setLlmConfig] = useState<LlmConfigView>();
+  const [llmForm, setLlmForm] = useState({ provider: "deepseek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", apiKey: "" });
+  const [llmBusy, setLlmBusy] = useState("");
+  const [llmMessage, setLlmMessage] = useState("");
   /** 这一轮输入的是录音还是纪要，决定左侧正文怎么画。 */
   const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
   /** 右栏两页：平时看日志，发现冲突时自动切到「冲突与方案」。 */
@@ -324,6 +338,58 @@ export function MeetingView({
     }
   }, []);
 
+  const openLlmSettings = useCallback(async () => {
+    setSettingsOpen(true);
+    setLlmMessage("");
+    try {
+      const view = await api.get<LlmConfigView>("/api/meeting/llm-config");
+      setLlmConfig(view);
+      setLlmForm({
+        provider: view.provider,
+        baseUrl: view.baseUrl,
+        model: view.model,
+        apiKey: "",
+      });
+    } catch (caught) {
+      setLlmMessage(errorMessage(caught));
+    }
+  }, []);
+
+  const saveLlmConfig = useCallback(async () => {
+    setLlmBusy("保存中…");
+    setLlmMessage("");
+    try {
+      const view = await api.put<LlmConfigView>("/api/meeting/llm-config", {
+        provider: llmForm.provider,
+        baseUrl: llmForm.baseUrl,
+        model: llmForm.model,
+        apiKey: llmForm.apiKey,
+      });
+      setLlmConfig(view);
+      setLlmForm((current) => ({ ...current, apiKey: "" }));
+      setLlmMessage("已保存");
+    } catch (caught) {
+      setLlmMessage(errorMessage(caught));
+    } finally {
+      setLlmBusy("");
+    }
+  }, [llmForm]);
+
+  const testLlmConfig = useCallback(async () => {
+    setLlmBusy("测试中…");
+    setLlmMessage("");
+    try {
+      const result = await api.post<{ latencyMs: number; model: string }>(
+        "/api/meeting/llm-config/test",
+      );
+      setLlmMessage(`连接正常：${result.model}，${result.latencyMs}ms`);
+    } catch (caught) {
+      setLlmMessage(errorMessage(caught));
+    } finally {
+      setLlmBusy("");
+    }
+  }, []);
+
   /** 人工入口：把上一次自动调整退回去。 */
   const handleUndo = useCallback(async () => {
     setManualBusy("正在撤销…");
@@ -517,6 +583,13 @@ export function MeetingView({
             <button
               type="button"
               className="secondary-button"
+              onClick={() => void openLlmSettings()}
+            >
+              <Settings2 size={14} /> AI 设置
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
               disabled={manualBusy !== ""}
               title="只清空本项目任务，保留成员和可用时间，用来接会议纪要"
               onClick={() => void handleReset("empty")}
@@ -599,6 +672,83 @@ export function MeetingView({
                 onClick={() => void startFromMinutes()}
               >
                 开始处理
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {settingsOpen ? (
+        <div className="meeting-modal-mask">
+          <div className="meeting-modal glass-panel" role="dialog" aria-modal="true">
+            <div className="meeting-modal-head">
+              <strong>AI 模型设置</strong>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="关闭"
+                onClick={() => setSettingsOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="meeting-settings-grid">
+              <label>
+                服务商
+                <select
+                  value={llmForm.provider}
+                  onChange={(event) => {
+                    const provider = event.target.value;
+                    const preset =
+                      provider === "siliconflow"
+                        ? { baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct" }
+                        : { baseUrl: "https://api.deepseek.com", model: "deepseek-chat" };
+                    setLlmForm((current) => ({ ...current, provider, ...preset }));
+                  }}
+                >
+                  <option value="deepseek">DeepSeek 官方</option>
+                  <option value="siliconflow">硅基流动</option>
+                  <option value="custom">其他（OpenAI 兼容）</option>
+                </select>
+              </label>
+              <label>
+                接口地址
+                <input
+                  value={llmForm.baseUrl}
+                  onChange={(event) => setLlmForm((c) => ({ ...c, baseUrl: event.target.value }))}
+                />
+              </label>
+              <label>
+                模型
+                <input
+                  value={llmForm.model}
+                  onChange={(event) => setLlmForm((c) => ({ ...c, model: event.target.value }))}
+                />
+              </label>
+              <label>
+                API Key
+                <input
+                  type="password"
+                  placeholder={llmConfig?.hasKey ? `已保存 ${llmConfig.keyHint}（留空则不修改）` : "sk-..."}
+                  value={llmForm.apiKey}
+                  onChange={(event) => setLlmForm((c) => ({ ...c, apiKey: event.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="meeting-modal-foot">
+              <span className="meeting-modal-hint">
+                {llmConfig === undefined
+                  ? "读取中…"
+                  : llmConfig.hasKey
+                    ? `当前来源：${llmConfig.source === "env" ? "环境变量" : "本机配置"}（${llmConfig.keyHint}）`
+                    : "当前未配置，会退回规则解析"}
+              </span>
+              {llmMessage !== "" ? <span className="meeting-modal-hint">{llmMessage}</span> : null}
+              <button className="secondary-button" type="button" disabled={llmBusy !== ""} onClick={() => void testLlmConfig()}>
+                测试连接
+              </button>
+              <button className="primary-button" type="button" disabled={llmBusy !== ""} onClick={() => void saveLlmConfig()}>
+                {llmBusy === "" ? "保存" : llmBusy}
               </button>
             </div>
           </div>
@@ -718,7 +868,15 @@ export function MeetingView({
                 </div>
               ) : null}
 
-              {error !== "" ? <div className="inline-error">{error}</div> : null}
+              {error !== "" ? (
+                <div className="inline-error">
+                  <AlertCircle size={16} />
+                  <div className="inline-error-text">{error}</div>
+                  <button className="secondary-button" type="button" onClick={() => void startProcessing()}>
+                    <RotateCcw size={14} /> 重试
+                  </button>
+                </div>
+              ) : null}
             </>
           )}
         </section>

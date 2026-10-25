@@ -7,6 +7,8 @@
  */
 import type { ZodType } from "zod";
 
+import { readLlmConfigFile } from "./llm-config.js";
+
 export interface LlmConfig {
   apiKey: string;
   baseUrl: string;
@@ -15,15 +17,28 @@ export interface LlmConfig {
 }
 
 export function llmFromEnv(): LlmConfig | null {
-  const apiKey = process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY;
-  if (apiKey === undefined || apiKey.trim() === "") return null;
-  const provider = (process.env.LLM_PROVIDER ?? "deepseek").toLowerCase();
-  return {
-    apiKey: apiKey.trim(),
-    baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
-    model: process.env.LLM_MODEL ?? "deepseek-chat",
-    provider,
-  };
+  // 环境变量优先（部署时用），其次读页面里保存的配置文件。
+  const envKey = process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY;
+  if (envKey !== undefined && envKey.trim() !== "") {
+    return {
+      apiKey: envKey.trim(),
+      baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
+      model: process.env.LLM_MODEL ?? "deepseek-chat",
+      provider: (process.env.LLM_PROVIDER ?? "deepseek").toLowerCase(),
+    };
+  }
+
+  const file = readLlmConfigFile();
+  if (file !== undefined) {
+    return {
+      apiKey: file.apiKey,
+      baseUrl: file.baseUrl,
+      model: file.model,
+      provider: file.provider.toLowerCase(),
+    };
+  }
+
+  return null;
 }
 
 export interface ChatJsonOptions {
@@ -78,7 +93,15 @@ export async function chatJson(options: ChatJsonOptions): Promise<ChatJsonResult
 
       if (!response.ok) {
         const body = await response.text();
-        throw new Error(`LLM HTTP ${response.status}: ${body.slice(0, 300)}`);
+        if (response.status === 401 || response.status === 403) {
+          throw new Error("大模型密钥无效或已过期，请到设置里检查 API Key。");
+        }
+        if (response.status === 429) {
+          throw new Error("大模型调用太频繁或额度不足，稍等一会儿再试。");
+        }
+        throw new Error(
+          `大模型服务返回 ${response.status}：${body.slice(0, 160)}`,
+        );
       }
 
       const payload = (await response.json()) as {
@@ -93,7 +116,11 @@ export async function chatJson(options: ChatJsonOptions): Promise<ChatJsonResult
       }
       return { value: checked.data, raw: lastRaw, attempts: attempt + 1 };
     } catch (error) {
-      lastError = error;
+      if (error instanceof Error && error.name === "AbortError") {
+        lastError = new Error(`大模型 ${Math.round(timeoutMs / 1000)} 秒没响应，可能是网络问题。`);
+      } else {
+        lastError = error;
+      }
       if (attempt === 1) break;
     } finally {
       clearTimeout(timer);
