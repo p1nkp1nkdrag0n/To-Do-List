@@ -433,11 +433,18 @@ export class MeetingOrchestrator {
       });
       if (extraction.tasks.length === 0) {
         const noKey = extraction.warnings.some((w) => w.includes("没有配置"));
+        // 最容易被误会的一种：纪要读懂了，但写的人不在当前项目里。
+        const outsiders = extraction.warnings.find((w) => w.includes("不在项目成员里"));
         const hints = [
+          outsiders !== undefined
+            ? "这段纪要里的人是别的项目的。请切换到包含他们的项目（例如「Demo」），或者先把他们加进当前项目。"
+            : "",
           noKey
             ? "你还没有配置大模型 Key：去「会议 → 手动 → AI 设置」添加后，抽取会准确很多；现在只能用规则解析，规则只认「谁 + 做什么 + 几小时」。"
             : "",
-          "建议在纪要里把「谁负责什么、要多久、什么时候前完成」写清楚，再试一次。",
+          outsiders === undefined && noKey === false
+            ? "建议在纪要里把「谁负责什么、要多久、什么时候前完成」写清楚，再试一次。"
+            : "",
           ...extraction.warnings,
         ].filter((line) => line !== "");
         throw new Error(`没能从这段纪要里抽出任务。\n${hints.join("\n")}`);
