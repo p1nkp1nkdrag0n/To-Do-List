@@ -1,0 +1,31 @@
+import { expect, test } from "@playwright/test";
+
+test("license and exact corresponding source are available without signing in", async ({ page, context }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  const link = page.getByRole("link", { name: "关于 / 开源许可" });
+  await expect(link).toBeVisible();
+  const popupPromise = context.waitForEvent("page");
+  await link.click();
+  const legal = await popupPromise;
+  await expect(legal).toHaveTitle("关于 / 开源许可 · TO DO LIST");
+  await expect(legal.getByRole("heading", { name: "关于 / 开源许可" })).toBeVisible();
+  await expect(legal.getByText("GNU Affero General Public License v3.0 only（AGPL-3.0-only）", { exact: true })).toBeVisible();
+  const source = legal.getByRole("link", { name: "下载此构建的对应源码" });
+  await expect(source).toHaveAttribute("href", /^source-[a-f0-9]{64}\.tar\.gz$/);
+  const downloadPromise = legal.waitForEvent("download");
+  await source.click();
+  expect((await downloadPromise).suggestedFilename()).toMatch(/^source-[a-f0-9]{64}\.tar\.gz$/);
+  await legal.getByRole("link", { name: "第三方完整许可与原作者声明" }).click();
+  await expect(legal.locator("body")).toContainText("Cole Bemis");
+  await expect(legal.locator("body")).toContainText("SIL OPEN FONT LICENSE");
+  await legal.goBack();
+  await legal.setViewportSize({ width: 390, height: 844 });
+  await expect(source).toBeVisible();
+  expect(await legal.locator("html").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await legal.getByRole("link", { name: "← 返回应用" }).click();
+  await expect(legal.getByRole("link", { name: "关于 / 开源许可" })).toBeVisible();
+  expect(errors).toEqual([]);
+  await legal.close();
+});

@@ -3,6 +3,25 @@
   letter-spacing: 0;
 }
 
+.open-source-link {
+  position: fixed;
+  right: 12px;
+  bottom: 8px;
+  z-index: 5;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.open-source-link:hover {
+  color: var(--blue);
+}
+
 html,
 body,
 #root {

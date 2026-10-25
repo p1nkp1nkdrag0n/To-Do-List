@@ -1,0 +1,3 @@
+# Keep upstream legal text verbatim, including intentional trailing spaces.
+LICENSE text eol=lf
+licenses/npm-notices.txt -text -whitespace

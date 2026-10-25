@@ -8,5 +8,8 @@ import "./styles.css";
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
+    <a className="open-source-link" href="/legal/" target="_blank" rel="noopener noreferrer">
+      关于 / 开源许可
+    </a>
   </StrictMode>,
 );
