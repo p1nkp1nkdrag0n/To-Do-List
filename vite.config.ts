@@ -1,8 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { legalAssetsPlugin } from "./scripts/legal-assets.mjs";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), legalAssetsPlugin()],
   server: {
     port: 5173,
     proxy: {
