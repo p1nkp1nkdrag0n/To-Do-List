@@ -55,16 +55,8 @@ export const LLM_PRESETS: LlmPreset[] = [
     label: "Kimi（月之暗面）",
     name: "Kimi",
     baseUrl: "https://api.moonshot.cn/v1",
-    models: ["kimi-k2.6", "kimi-k3", "kimi-k3.1-pro", "kimi-k2.7-code"],
+    models: ["kimi-k3.1-pro-highspeed", "kimi-k3", "kimi-k3.1-pro", "kimi-k2.6", "kimi-k2.7-code"],
     note: "Kimi 旧版 moonshot-v1-* 已下线；用「用 Key 拉取可用模型」可以看到你账号实际能用的名字。",
-  },
-  {
-    key: "ollama",
-    label: "本地 Ollama",
-    name: "本地 Ollama",
-    baseUrl: "http://localhost:11434/v1",
-    models: ["qwen2.5:7b", "qwen2.5:14b", "llama3.1:8b"],
-    note: "本地服务不需要 Key，但 Ollama 要求环境变量 OLLAMA_ORIGINS 允许跨域。",
   },
   {
     key: "custom",

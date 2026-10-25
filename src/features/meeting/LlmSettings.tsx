@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { Check, Plus, RefreshCw, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 
 import { api, errorMessage } from "../../lib/api";
 import { LLM_PRESETS, presetByBaseUrl, type LlmPreset } from "./llm-presets";
@@ -71,22 +71,6 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       await api.put(`/api/meeting/llm/providers/${provider.id}`, { model });
       await load();
       setMessage(`已切到 ${model}`);
-    } catch (caught) {
-      setMessage(errorMessage(caught));
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const syncModels = async (provider: ProviderView) => {
-    setBusy("拉取模型…");
-    setMessage("");
-    try {
-      const result = await api.post<{ models: string[] }>(
-        `/api/meeting/llm/providers/${provider.id}/models`,
-      );
-      setModelOptions((current) => ({ ...current, [provider.id]: result.models }));
-      setMessage(`拉到 ${result.models.length} 个可用模型`);
     } catch (caught) {
       setMessage(errorMessage(caught));
     } finally {
@@ -221,15 +205,6 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                         </option>
                       ))}
                     </select>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      title="用 Key 拉取这个平台可用的模型"
-                      disabled={busy !== "" || !provider.hasKey}
-                      onClick={() => void syncModels(provider)}
-                    >
-                      <RefreshCw size={13} />
-                    </button>
                   </div>
 
                   {needKeyFor === provider.id ? (
@@ -293,26 +268,6 @@ function AddProvider({
   const [presetKey, setPresetKey] = useState<string>("deepseek");
   const [model, setModel] = useState<string>("deepseek-chat");
   const [apiKey, setApiKey] = useState("");
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
-  const [fetching, setFetching] = useState(false);
-  const [fetchError, setFetchError] = useState("");
-
-  const fetchModels = async () => {
-    setFetching(true);
-    setFetchError("");
-    try {
-      const result = await api.post<{ models: string[] }>("/api/meeting/llm/models", {
-        baseUrl: preset.baseUrl,
-        apiKey,
-      });
-      setModelOptions(result.models);
-      if (result.models.length > 0) setModel(result.models[0]!);
-    } catch (caught) {
-      setFetchError(errorMessage(caught));
-    } finally {
-      setFetching(false);
-    }
-  };
 
   const preset = LLM_PRESETS.find((item) => item.key === presetKey) ?? LLM_PRESETS[0]!;
   const freeform = preset.freeform === true;
@@ -343,28 +298,21 @@ function AddProvider({
 
       <label className="llm-field">
         模型
-        {modelOptions.length > 0 ? (
-          <select value={model} onChange={(event) => setModel(event.target.value)}>
-            {modelOptions.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        ) : (
+        {freeform ? (
           <input
             value={model}
             placeholder="模型名"
             onChange={(event) => setModel(event.target.value)}
           />
+        ) : (
+          <select value={model} onChange={(event) => setModel(event.target.value)}>
+            {preset.models.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
         )}
-        <button
-          className="link-button llm-fetch"
-          type="button"
-          onClick={() => void fetchModels()}
-        >
-          {fetching ? "拉取中…" : "用 Key 拉取可用模型"}
-        </button>
       </label>
 
       <label className="llm-field">
@@ -377,7 +325,6 @@ function AddProvider({
         />
       </label>
 
-      {fetchError !== "" ? <p className="llm-note llm-note-error">{fetchError}</p> : null}
       {preset.note !== undefined ? <p className="llm-note">{preset.note}</p> : null}
 
       <div className="llm-add-actions">
