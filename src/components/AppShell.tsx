@@ -16,6 +16,7 @@ import {
   Sun,
   SunMoon,
   UserPlus,
+  KeyRound,
 } from "lucide-react";
 
 import type { PresenceUser } from "../../shared/realtime-contracts";
@@ -40,6 +41,7 @@ interface AppShellProps {
   onChangeView: (view: WorkspaceView) => void;
   onCreateProject: () => void;
   onInvite: () => void;
+  onRegistrationInvites: () => void;
   onProjectSettings: () => void;
   onLogout: () => void;
 }
@@ -74,6 +76,7 @@ export function AppShell({
   onChangeView,
   onCreateProject,
   onInvite,
+  onRegistrationInvites,
   onProjectSettings,
   onLogout,
 }: AppShellProps) {
@@ -199,6 +202,16 @@ export function AppShell({
             >
               <UserPlus size={17} />
               <span className="utility-label">邀请项目成员</span>
+            </button>
+            <button
+              type="button"
+              aria-label="注册邀请码"
+              title={sidebarCollapsed ? "注册邀请码" : undefined}
+              data-tooltip="注册邀请码"
+              onClick={onRegistrationInvites}
+            >
+              <KeyRound size={17} />
+              <span className="utility-label">注册邀请码</span>
             </button>
             <button
               type="button"

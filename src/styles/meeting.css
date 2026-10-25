@@ -1295,3 +1295,64 @@
   color: var(--ink);
   background: var(--surface-soft);
 }
+
+/* 注册邀请码 */
+.invite-fresh {
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, var(--line));
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--blue) 6%, var(--surface));
+}
+
+.invite-fresh p {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.invite-fresh-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.invite-fresh-row code {
+  flex: 1;
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--ink);
+}
+
+.invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.invite-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.invite-state {
+  font-size: 11px;
+  width: fit-content;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.invite-state.state-active {
+  color: var(--green, #16a34a);
+  border-color: color-mix(in srgb, var(--green, #16a34a) 40%, var(--line));
+}
+
+.invite-time {
+  font-size: 10.5px;
+  color: var(--muted);
+}
