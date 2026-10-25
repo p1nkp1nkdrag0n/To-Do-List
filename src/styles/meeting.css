@@ -849,3 +849,189 @@
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
   pointer-events: none;
 }
+
+/* ── AI 供应商面板（cc-switch 风格） ───────────────────────────── */
+.llm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 24, 39, 0.38);
+  backdrop-filter: blur(3px);
+}
+
+.llm-panel {
+  width: min(760px, 92vw);
+  height: min(500px, 82vh);
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.llm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.llm-head strong {
+  display: block;
+  font-size: 14px;
+}
+
+.llm-head span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+.llm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  background: var(--surface-soft);
+}
+
+.llm-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.llm-item:hover {
+  background: var(--surface);
+}
+
+.llm-item.on {
+  border-color: color-mix(in srgb, var(--blue) 40%, var(--line));
+  background: var(--surface);
+}
+
+.llm-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.llm-item-host {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.llm-empty {
+  font-size: 11.5px;
+  color: var(--muted);
+  padding: 8px;
+}
+
+.llm-list-foot {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.llm-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line-strong, var(--line));
+  border-radius: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.llm-add select {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--muted);
+  outline: none;
+}
+
+.llm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.llm-note {
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.llm-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.llm-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-grid input {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.llm-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.llm-status {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-active-tag {
+  font-size: 11px;
+  color: var(--green, #16a34a);
+  border: 1px solid color-mix(in srgb, var(--green, #16a34a) 35%, var(--line));
+  border-radius: 999px;
+  padding: 3px 9px;
+}

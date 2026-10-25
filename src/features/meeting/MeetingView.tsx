@@ -4,6 +4,7 @@ import { AlertCircle, ArrowRight, FileText, LoaderCircle, Mic, Pause, Play, Rota
 import type { CollaborationState } from "../../lib/collaboration-state";
 import { api, errorMessage } from "../../lib/api";
 import type { ProjectDetail } from "../../types";
+import { LlmSettings } from "./LlmSettings";
 import {
   DEMO_AUDIO_SECONDS,
   DEMO_TASKS,
@@ -708,84 +709,7 @@ export function MeetingView({
         </div>
       ) : null}
 
-      {settingsOpen ? (
-        <div className="meeting-modal-mask">
-          <div className="meeting-modal glass-panel" role="dialog" aria-modal="true">
-            <div className="meeting-modal-head">
-              <strong>AI 模型设置</strong>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="关闭"
-                onClick={() => setSettingsOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="meeting-settings-grid">
-              <label>
-                服务商
-                <select
-                  value={llmForm.provider}
-                  onChange={(event) => {
-                    const provider = event.target.value;
-                    const preset =
-                      provider === "siliconflow"
-                        ? { baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct" }
-                        : { baseUrl: "https://api.deepseek.com", model: "deepseek-chat" };
-                    setLlmForm((current) => ({ ...current, provider, ...preset }));
-                  }}
-                >
-                  <option value="deepseek">DeepSeek 官方</option>
-                  <option value="siliconflow">硅基流动</option>
-                  <option value="custom">其他（OpenAI 兼容）</option>
-                </select>
-              </label>
-              <label>
-                接口地址
-                <input
-                  value={llmForm.baseUrl}
-                  onChange={(event) => setLlmForm((c) => ({ ...c, baseUrl: event.target.value }))}
-                />
-              </label>
-              <label>
-                模型
-                <input
-                  value={llmForm.model}
-                  onChange={(event) => setLlmForm((c) => ({ ...c, model: event.target.value }))}
-                />
-              </label>
-              <label>
-                API Key
-                <input
-                  type="password"
-                  placeholder={llmConfig?.hasKey ? `已保存 ${llmConfig.keyHint}（留空则不修改）` : "sk-..."}
-                  value={llmForm.apiKey}
-                  onChange={(event) => setLlmForm((c) => ({ ...c, apiKey: event.target.value }))}
-                />
-              </label>
-            </div>
-            <div className="meeting-modal-foot">
-              <span className="meeting-modal-hint">
-                {llmConfig === undefined
-                  ? "读取中…"
-                  : llmConfig.hasKey
-                    ? `当前来源：${llmConfig.source === "env" ? "环境变量" : "本机配置"}（${llmConfig.keyHint}）`
-                    : "当前未配置，会退回规则解析"}
-              </span>
-              {llmMessage !== "" ? <span className="meeting-modal-hint">{llmMessage}</span> : null}
-              <button className="secondary-button" type="button" disabled={llmBusy !== ""} onClick={() => void testLlmConfig()}>
-                测试连接
-              </button>
-              <button className="primary-button" type="button" disabled={llmBusy !== ""} onClick={() => void saveLlmConfig()}>
-                {llmBusy === "" ? "保存" : llmBusy}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {notice !== "" ? <div className="meeting-notice">{notice}</div> : null}
+      <LlmSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <div className="meeting-body">
         <section className="meeting-pane meeting-main">

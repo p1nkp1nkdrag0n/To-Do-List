@@ -24,10 +24,12 @@ import express from "express";
 import { MeetingControl } from "./control.js";
 import { chatJson } from "./llm.js";
 import {
-  clearLlmConfigFile,
-  llmConfigView,
-  readLlmConfigFile,
-  writeLlmConfigFile,
+  activateProvider,
+  configView,
+  createProvider,
+  deleteProvider,
+  readConfig,
+  updateProvider,
 } from "./llm-config.js";
 import { parseMinutesFile } from "./minutes-file.js";
 import { clearProjectSchedule } from "./demo-reset.js";
@@ -201,76 +203,89 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     },
   );
 
-  /** 读当前大模型配置（key 只回显末四位）。 */
+  /** 读全部供应商（key 只回显末四位，外加“当前是哪个”）。 */
   router.get("/llm-config", (_request, response) => {
-    response.json(llmConfigView());
+    response.json(configView());
   });
 
-  /** 保存配置。apiKey 留空表示沿用已有的。 */
-  router.put(
-    "/llm-config",
-    (request, response) => {
-      const input = parseRequestBody(
-        z
-          .object({
-            provider: z.string().min(1).max(40),
-            baseUrl: z.string().url(),
-            model: z.string().min(1).max(80),
-            apiKey: z.string().max(200).optional(),
-          })
-          .strict(),
-        request,
-      );
-      const existing = readLlmConfigFile();
-      const apiKey = input.apiKey !== undefined && input.apiKey.trim() !== ""
-        ? input.apiKey.trim()
-        : existing?.apiKey;
-      if (apiKey === undefined) {
-        throw new HttpError(400, "API_KEY_REQUIRED", "第一次保存需要填写 API Key。");
-      }
-      writeLlmConfigFile({
-        provider: input.provider,
-        baseUrl: input.baseUrl.replace(/\/$/, ""),
-        model: input.model,
-        apiKey,
-      });
-      response.json(llmConfigView());
-    },
-  );
-
-  /** 清掉本地配置（环境变量不受影响）。 */
-  router.delete("/llm-config", (_request, response) => {
-    clearLlmConfigFile();
-    response.json(llmConfigView());
+  /** 新增一个供应商；第一个自动设为当前。 */
+  router.post("/llm/providers", (request, response) => {
+    const input = parseRequestBody(
+      z
+        .object({
+          name: z.string().min(1).max(40),
+          baseUrl: z.string().url(),
+          model: z.string().min(1).max(80),
+          apiKey: z.string().max(200),
+        })
+        .strict(),
+      request,
+    );
+    const created = createProvider(input);
+    response.status(201).json({ id: created.id, ...configView() });
   });
 
-  /** 用当前配置发一次最小请求，验证 key 是否可用。 */
-  router.post("/llm-config/test", async (_request, response) => {
-    const view = llmConfigView();
-    if (!view.hasKey) {
-      throw new HttpError(400, "NO_LLM_CONFIG", "还没有配置大模型 Key。");
+  /** 改一个供应商；apiKey 留空表示不改。 */
+  router.put("/llm/providers/:id", (request, response) => {
+    const input = parseRequestBody(
+      z
+        .object({
+          name: z.string().min(1).max(40).optional(),
+          baseUrl: z.string().url().optional(),
+          model: z.string().min(1).max(80).optional(),
+          apiKey: z.string().max(200).optional(),
+        })
+        .strict(),
+      request,
+    );
+    const updated = updateProvider(String(request.params.id), input);
+    if (updated === undefined) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
     }
-    const config = {
-      apiKey: "",
-      baseUrl: view.baseUrl,
-      model: view.model,
-      provider: view.provider,
-    };
-    // 真实 key 只在内部取一次，不经过返回值。
-    const file = readLlmConfigFile();
-    config.apiKey =
-      process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? file?.apiKey ?? "";
+    response.json(configView());
+  });
 
+  router.delete("/llm/providers/:id", (request, response) => {
+    if (!deleteProvider(String(request.params.id))) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+    }
+    response.json(configView());
+  });
+
+  /** 切换当前供应商 —— cc-switch 的核心动作。 */
+  router.post("/llm/providers/:id/activate", (request, response) => {
+    if (!activateProvider(String(request.params.id))) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+    }
+    response.json(configView());
+  });
+
+  /** 用某个供应商发一次最小请求，验证 key 是否可用。 */
+  router.post("/llm/providers/:id/test", async (request, response) => {
+    const provider = readConfig().providers.find(
+      (item) => item.id === String(request.params.id),
+    );
+    if (provider === undefined) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+    }
+    if (provider.apiKey === "") {
+      throw new HttpError(400, "API_KEY_REQUIRED", "这个供应商还没有填 API Key。");
+    }
     try {
       const started = Date.now();
       await chatJson({
-        config,
+        config: {
+          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl,
+          model: provider.model,
+          provider: provider.name.toLowerCase(),
+        },
         system: "你是一个连通性测试助手，只输出 JSON。",
         user: '返回 {"ok": true}',
         schema: z.object({ ok: z.boolean() }),
         timeoutMs: 15_000,
       });
-      response.json({ ok: true, latencyMs: Date.now() - started, model: view.model });
+      response.json({ ok: true, latencyMs: Date.now() - started, model: provider.model });
     } catch (error) {
       throw new HttpError(
         400,

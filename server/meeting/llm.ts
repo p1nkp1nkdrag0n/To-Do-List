@@ -7,7 +7,7 @@
  */
 import type { ZodType } from "zod";
 
-import { readLlmConfigFile } from "./llm-config.js";
+import { activeProvider, envApiKey } from "./llm-config.js";
 
 export interface LlmConfig {
   apiKey: string;
@@ -17,24 +17,25 @@ export interface LlmConfig {
 }
 
 export function llmFromEnv(): LlmConfig | null {
-  // 环境变量优先（部署时用），其次读页面里保存的配置文件。
-  const envKey = process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY;
-  if (envKey !== undefined && envKey.trim() !== "") {
+  // 1) 页面里选中的供应商优先（像 cc-switch：选谁用谁）
+  const provider = activeProvider();
+  if (provider !== undefined) {
     return {
-      apiKey: envKey.trim(),
-      baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
-      model: process.env.LLM_MODEL ?? "deepseek-chat",
-      provider: (process.env.LLM_PROVIDER ?? "deepseek").toLowerCase(),
+      apiKey: provider.apiKey,
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      provider: provider.name.toLowerCase(),
     };
   }
 
-  const file = readLlmConfigFile();
-  if (file !== undefined) {
+  // 2) 环境变量兜底（部署 / CI 用）
+  const envKey = envApiKey();
+  if (envKey !== undefined) {
     return {
-      apiKey: file.apiKey,
-      baseUrl: file.baseUrl,
-      model: file.model,
-      provider: file.provider.toLowerCase(),
+      apiKey: envKey,
+      baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
+      model: process.env.LLM_MODEL ?? "deepseek-chat",
+      provider: (process.env.LLM_PROVIDER ?? "deepseek").toLowerCase(),
     };
   }
 
