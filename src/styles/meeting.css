@@ -1035,3 +1035,68 @@
   border-radius: 999px;
   padding: 3px 9px;
 }
+
+/* 预设按钮网格 + 只读地址 */
+.llm-add-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-add-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.llm-preset {
+  padding: 7px 6px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.llm-preset:hover {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  background: var(--surface);
+}
+
+.llm-current {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.llm-locked-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.llm-grid select {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.llm-grid input.locked {
+  color: var(--muted);
+}

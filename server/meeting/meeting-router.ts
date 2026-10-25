@@ -21,6 +21,8 @@ import { MeetingOrchestrator } from "./orchestrator.js";
 
 import express from "express";
 
+import { asyncRoute } from "../http/routing.js";
+
 import { MeetingControl } from "./control.js";
 import { chatJson } from "./llm.js";
 import {
@@ -94,7 +96,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
 
   router.post(
     "/run",
-    async (request, response: Response<unknown, AuthLocals>) => {
+    asyncRoute(async (request, response) => {
       const { projectId, minutes, lockOwners, replaceSchedule } = parseRequestBody(
         RunWithMinutesSchema,
         request,
@@ -176,7 +178,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         durationMs: result.durationMs,
         events: result.events,
       });
-    },
+    }),
   );
 
   /**
@@ -186,7 +188,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/minutes",
     express.raw({ type: "*/*", limit: "20mb" }),
-    async (request, response: Response<unknown, AuthLocals>) => {
+    asyncRoute(async (request, response) => {
       const rawName = String(request.headers["x-filename"] ?? "minutes.txt");
       let filename = rawName;
       try {
@@ -200,7 +202,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       }
       const parsed = await parseMinutesFile(filename, body);
       response.json({ filename: parsed.filename, chars: parsed.chars, text: parsed.text });
-    },
+    }),
   );
 
   /** 读全部供应商（key 只回显末四位，外加“当前是哪个”）。 */
@@ -261,7 +263,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   });
 
   /** 用某个供应商发一次最小请求，验证 key 是否可用。 */
-  router.post("/llm/providers/:id/test", async (request, response) => {
+  router.post("/llm/providers/:id/test", asyncRoute(async (request, response) => {
     const provider = readConfig().providers.find(
       (item) => item.id === String(request.params.id),
     );
@@ -293,7 +295,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         error instanceof Error ? error.message : String(error),
       );
     }
-  });
+  }));
 
   /** 暂停 / 继续：只在会议处理跑到一半时有意义。 */
   router.post(
@@ -362,7 +364,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   /** 还原演示数据（现场保险）：本质上是跑一遍 seed 脚本 --reset。 */
   router.post(
     "/reset",
-    async (request, response: Response<unknown, AuthLocals>) => {
+    asyncRoute(async (request, response) => {
       const { projectId, mode } = parseRequestBody(ResetRequestSchema, request);
       try {
         availability.projectSummary(response.locals.auth, projectId);
@@ -408,7 +410,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         exitCode: code,
         tail: output.trim().split("\n").slice(-6),
       });
-    },
+    }),
   );
 
   return router;

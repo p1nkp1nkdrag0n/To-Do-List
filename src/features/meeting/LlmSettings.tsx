@@ -1,12 +1,13 @@
 /**
- * AI 供应商切换面板（照 cc-switch 的样子做的）：
- * 左边一列供应商，右边编辑当前选中的那个，点一下就切换。
+ * AI 供应商切换面板（cc-switch 风格）：
+ * 左边一列供应商，右边编辑；选模板自动带出地址与模型，只让用户填 Key。
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { Check, Plus, Trash2, Zap } from "lucide-react";
+import { Check, Lock, Plus, Trash2, Zap } from "lucide-react";
 
 import { api, errorMessage } from "../../lib/api";
+import { LLM_PRESETS, presetByBaseUrl, presetByKey, type LlmPreset } from "./llm-presets";
 
 interface ProviderView {
   id: string;
@@ -25,58 +26,45 @@ interface LlmConfigView {
   envAvailable: boolean;
 }
 
-interface Preset {
-  key: string;
-  label: string;
-  name: string;
-  baseUrl: string;
-  model: string;
-}
-
-const PRESETS: Preset[] = [
-  { key: "deepseek", label: "DeepSeek 官方", name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat" },
-  { key: "siliconflow", label: "硅基流动", name: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct" },
-  { key: "dashscope", label: "通义千问", name: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-  { key: "zhipu", label: "智谱 GLM", name: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
-  { key: "moonshot", label: "Kimi", name: "Kimi", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
-  { key: "ollama", label: "本地 Ollama", name: "本地 Ollama", baseUrl: "http://localhost:11434/v1", model: "qwen2.5:7b" },
-  { key: "custom", label: "自定义", name: "自定义供应商", baseUrl: "", model: "" },
-];
-
 const EMPTY_FORM = { name: "", baseUrl: "", model: "", apiKey: "" };
 
 export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [view, setView] = useState<LlmConfigView>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  /** 当前正在套用的模板；自定义时为 undefined。 */
+  const [preset, setPreset] = useState<LlmPreset | undefined>();
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
 
-  const load = useCallback(async (keepSelection?: string) => {
-    try {
-      const next = await api.get<LlmConfigView>("/api/meeting/llm-config");
-      setView(next);
-      const target =
-        keepSelection ??
-        selectedId ??
-        next.activeId ??
-        next.providers[0]?.id ??
-        null;
-      setSelectedId(target);
-      const provider = next.providers.find((item) => item.id === target);
-      if (provider !== undefined) {
-        setForm({
-          name: provider.name,
-          baseUrl: provider.baseUrl,
-          model: provider.model,
-          apiKey: "",
-        });
+  const applyProvider = useCallback((provider: ProviderView) => {
+    setSelectedId(provider.id);
+    setForm({
+      name: provider.name,
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      apiKey: "",
+    });
+    setPreset(presetByBaseUrl(provider.baseUrl));
+    setMessage("");
+  }, []);
+
+  const load = useCallback(
+    async (keepSelection?: string) => {
+      try {
+        const next = await api.get<LlmConfigView>("/api/meeting/llm-config");
+        setView(next);
+        const target = keepSelection ?? selectedId ?? next.activeId ?? next.providers[0]?.id ?? null;
+        setSelectedId(target);
+        const provider = next.providers.find((item) => item.id === target);
+        if (provider !== undefined) applyProvider(provider);
+      } catch (caught) {
+        setMessage(errorMessage(caught));
       }
-    } catch (caught) {
-      setMessage(errorMessage(caught));
-    }
-  }, [selectedId]);
+    },
+    [applyProvider, selectedId],
+  );
 
   useEffect(() => {
     if (open) void load();
@@ -85,23 +73,18 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
 
   const selected = view?.providers.find((item) => item.id === selectedId);
 
-  const pick = (provider: ProviderView) => {
-    setCreating(false);
-    setSelectedId(provider.id);
-    setForm({
-      name: provider.name,
-      baseUrl: provider.baseUrl,
-      model: provider.model,
-      apiKey: "",
-    });
-    setMessage("");
-  };
-
   const startCreate = (presetKey: string) => {
-    const preset = PRESETS.find((item) => item.key === presetKey) ?? PRESETS[0]!;
+    const next = presetByKey(presetKey);
+    if (next === undefined) return;
     setCreating(true);
     setSelectedId(null);
-    setForm({ name: preset.name, baseUrl: preset.baseUrl, model: preset.model, apiKey: "" });
+    setPreset(next.freeform === true ? undefined : next);
+    setForm({
+      name: next.name,
+      baseUrl: next.baseUrl,
+      model: next.models[0] ?? "",
+      apiKey: "",
+    });
     setMessage("");
   };
 
@@ -114,8 +97,12 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       } else if (selectedId !== null) {
         await api.put(`/api/meeting/llm/providers/${selectedId}`, form);
       }
-      await load(selectedId ?? undefined);
+      const next = await api.get<LlmConfigView>("/api/meeting/llm-config");
+      setView(next);
       setCreating(false);
+      const target = next.activeId ?? next.providers[0]?.id ?? null;
+      const provider = next.providers.find((item) => item.id === target);
+      if (provider !== undefined) applyProvider(provider);
       setMessage("已保存");
     } catch (caught) {
       setMessage(errorMessage(caught));
@@ -127,9 +114,11 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   const activate = async (id: string) => {
     setBusy("切换中…");
     try {
-      await api.post(`/api/meeting/llm/providers/${id}/activate`);
-      await load(id);
-      setMessage("已切换");
+      const next = await api.post<LlmConfigView>(`/api/meeting/llm/providers/${id}/activate`);
+      setView(next);
+      const provider = next.providers.find((item) => item.id === id);
+      if (provider !== undefined) applyProvider(provider);
+      setMessage("已切换，之后都用它");
     } catch (caught) {
       setMessage(errorMessage(caught));
     } finally {
@@ -168,13 +157,17 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
 
   if (!open) return null;
 
+  const locked = preset !== undefined && preset.freeform !== true;
+  const models = preset?.models ?? [];
+  const canSave = form.name.trim() !== "" && form.baseUrl.trim() !== "" && form.model.trim() !== "";
+
   return (
     <div className="llm-mask" role="dialog" aria-modal="true">
       <div className="llm-panel">
         <header className="llm-head">
           <div>
             <strong>AI 供应商</strong>
-            <span>选一个当前要用的，点一下就能切</span>
+            <span>选一个模板，填 Key 就能用；点一下切换当前使用</span>
           </div>
           <button className="icon-button" type="button" aria-label="关闭" onClick={onClose}>
             ×
@@ -191,41 +184,51 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                 key={provider.id}
                 type="button"
                 className={`llm-item ${provider.id === selectedId && !creating ? "on" : ""}`}
-                onClick={() => pick(provider)}
+                onClick={() => {
+                  setCreating(false);
+                  applyProvider(provider);
+                }}
               >
                 <span className="llm-item-name">
                   {provider.active ? <Check size={13} /> : null}
                   {provider.name}
                 </span>
-                <span className="llm-item-host">{hostOf(provider.baseUrl)}</span>
+                <span className="llm-item-host">
+                  {provider.model} · {hostOf(provider.baseUrl)}
+                </span>
               </button>
             ))}
 
             <div className="llm-list-foot">
-              <label className="llm-add">
+              <div className="llm-add-title">
                 <Plus size={13} /> 添加供应商
-                <select
-                  value=""
-                  onChange={(event) => {
-                    if (event.target.value !== "") startCreate(event.target.value);
-                    event.target.value = "";
-                  }}
-                >
-                  <option value="">选择模板…</option>
-                  {PRESETS.map((preset) => (
-                    <option key={preset.key} value={preset.key}>
-                      {preset.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              </div>
+              <div className="llm-add-grid">
+                {LLM_PRESETS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className="llm-preset"
+                    onClick={() => startCreate(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </aside>
 
           <section className="llm-form">
+            {creating ? null : (
+              <p className="llm-current">
+                正在编辑：<strong>{selected?.name ?? "—"}</strong>
+                {selected?.active === true ? <span className="llm-active-tag">当前使用中</span> : null}
+              </p>
+            )}
+            {preset?.note !== undefined ? <p className="llm-note">{preset.note}</p> : null}
             {view?.envAvailable ? (
               <p className="llm-note">
-                检测到环境变量里也配了 key；页面里选中的供应商优先，其次才用它。
+                环境变量里也配了 key；页面里选中的供应商优先，环境变量只做兜底。
               </p>
             ) : null}
 
@@ -235,24 +238,48 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                 <input
                   value={form.name}
                   placeholder="例如 DeepSeek"
+                  readOnly={locked}
+                  className={locked ? "locked" : ""}
                   onChange={(event) => setForm((c) => ({ ...c, name: event.target.value }))}
                 />
               </label>
               <label>
                 接口地址
-                <input
-                  value={form.baseUrl}
-                  placeholder="https://api.deepseek.com"
-                  onChange={(event) => setForm((c) => ({ ...c, baseUrl: event.target.value }))}
-                />
+                {locked ? (
+                  <span className="llm-locked-line">
+                    <Lock size={12} /> {form.baseUrl}
+                  </span>
+                ) : (
+                  <input
+                    value={form.baseUrl}
+                    placeholder="https://api.deepseek.com"
+                    onChange={(event) => setForm((c) => ({ ...c, baseUrl: event.target.value }))}
+                  />
+                )}
               </label>
               <label>
                 模型
-                <input
-                  value={form.model}
-                  placeholder="deepseek-chat"
-                  onChange={(event) => setForm((c) => ({ ...c, model: event.target.value }))}
-                />
+                {locked && models.length > 0 ? (
+                  <select
+                    value={form.model}
+                    onChange={(event) => setForm((c) => ({ ...c, model: event.target.value }))}
+                  >
+                    {models.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                    {models.includes(form.model) ? null : (
+                      <option value={form.model}>{form.model}</option>
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    value={form.model}
+                    placeholder="deepseek-chat"
+                    onChange={(event) => setForm((c) => ({ ...c, model: event.target.value }))}
+                  />
+                )}
               </label>
               <label>
                 API Key
@@ -260,7 +287,7 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                   type="password"
                   value={form.apiKey}
                   placeholder={
-                    selected?.hasKey === true ? `已保存 ${selected.keyHint}（留空不改）` : "sk-..."
+                    selected?.hasKey === true ? `已保存 ${selected.keyHint}（留空不改）` : "粘贴你的 Key"
                   }
                   onChange={(event) => setForm((c) => ({ ...c, apiKey: event.target.value }))}
                 />
@@ -288,9 +315,7 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                     >
                       <Zap size={13} /> 设为当前
                     </button>
-                  ) : (
-                    <span className="llm-active-tag">当前使用中</span>
-                  )}
+                  ) : null}
                   <button
                     className="icon-button"
                     type="button"
@@ -305,7 +330,7 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
               <button
                 className="primary-button"
                 type="button"
-                disabled={busy !== "" || form.name.trim() === "" || form.baseUrl.trim() === ""}
+                disabled={busy !== "" || !canSave}
                 onClick={() => void save()}
               >
                 {creating ? "添加" : "保存"}

@@ -222,6 +222,10 @@ const entrypointUrl = process.argv[1]
   : undefined;
 
 if (entrypointUrl === import.meta.url) {
+  // 兜底：任何漏掉的异步异常都不应该让 API 直接退出（页面会变成 502）。
+  process.on("unhandledRejection", (reason) => {
+    console.error("[unhandledRejection]", reason);
+  });
   loadEnvFile();
   void startV2Server()
     .then((handle) => {
