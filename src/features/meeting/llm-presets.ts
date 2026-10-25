@@ -20,7 +20,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     label: "DeepSeek 官方",
     name: "DeepSeek",
     baseUrl: "https://api.deepseek.com",
-    models: ["deepseek-chat", "deepseek-reasoner"],
+    // deepseek-chat 是旧别名；新账号能用的旗舰/快速模型是这两个。
+    models: ["deepseek-v4-pro", "deepseek-flash", "deepseek-chat"],
+    note: "deepseek-v4-pro 质量最好，deepseek-flash 更便宜更快；deepseek-chat 是旧别名，仍可用。",
   },
   {
     key: "siliconflow",
