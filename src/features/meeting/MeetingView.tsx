@@ -486,12 +486,34 @@ export function MeetingView({
       <header className="meeting-toolbar glass-panel">
         <div className="meeting-heading">
           <strong>会议处理</strong>
-          <span>{project.project.name} · {recordingName}</span>
+          <span>
+            {project.project.name} ·{" "}
+            {inputMode === "minutes"
+              ? minutesFileName !== ""
+                ? minutesFileName
+                : `会议纪要（${minutesText.trim().length} 字）`
+              : recordingName}
+          </span>
         </div>
         <div className="meeting-phases" aria-label="处理阶段">
-          {["上传录音", "转写", "抽任务", "排期", "修复"].map((label, index) => {
+          {(inputMode === "minutes"
+            ? ["上传纪要", "抽任务", "建排期", "修复"]
+            : ["上传录音", "转写", "抽任务", "排期", "修复"]
+          ).map((label, index) => {
             const activeIndex =
-              phase === "idle" ? 0 : phase === "transcribing" ? 1 : phase === "running" ? 3 : 4;
+              inputMode === "minutes"
+                ? phase === "idle"
+                  ? 0
+                  : phase === "running"
+                    ? 2
+                    : 3
+                : phase === "idle"
+                  ? 0
+                  : phase === "transcribing"
+                    ? 1
+                    : phase === "running"
+                      ? 3
+                      : 4;
             return (
               <span key={label} className={index <= activeIndex ? "on" : ""}>
                 {label}
@@ -760,8 +782,8 @@ export function MeetingView({
           {phase === "idle" ? (
             <div className="meeting-empty">
               <div className="meeting-empty-icon"><Mic size={26} /></div>
-              <h2>上传今天的会议录音</h2>
-              <p>点一次「上传会议录音」，转写、抽任务、排期和冲突修复都会自动完成。</p>
+              <h2>上传今天的会议录音，或粘贴会议纪要</h2>
+              <p>点一次就好：转写（或直接读纪要）、抽任务、排期和冲突修复都会自动完成。</p>
               <button className="primary-button" type="button" onClick={() => void startProcessing()}>
                 <Upload size={16} /> 上传会议录音
               </button>
