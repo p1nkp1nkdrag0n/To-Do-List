@@ -35,14 +35,16 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   /** 每个供应商可选的模型（预设 + 从平台拉到的）。 */
-  const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
+  const [modelOptions, setModelOptions] = useState<
+    Record<string, Array<{ id: string; name: string }>>
+  >({});
 
   const syncAll = useCallback(async (providers: ProviderView[]) => {
     const withKey = providers.filter((item) => item.hasKey);
     await Promise.all(
       withKey.map(async (provider) => {
         try {
-          const result = await api.post<{ models: string[] }>(
+          const result = await api.post<{ models: Array<{ id: string; name: string }> }>(
             `/api/meeting/llm/providers/${provider.id}/models`,
           );
           if (result.models.length > 0) {
@@ -76,11 +78,20 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
     }
   }, [open, load]);
 
-  const optionsFor = (provider: ProviderView): string[] => {
+  /** 下拉选项：当前模型 + 平台返回的（带友好名）+ 内置预设。 */
+  const optionsFor = (provider: ProviderView): Array<{ id: string; label: string }> => {
     const preset = presetByBaseUrl(provider.baseUrl);
-    const base = preset?.models ?? [];
-    const merged = [...new Set([provider.model, ...(modelOptions[provider.id] ?? []), ...base])];
-    return merged;
+    const fromApi = modelOptions[provider.id] ?? [];
+    const labelOf = (id: string): string => {
+      const hit = fromApi.find((item) => item.id === id);
+      return hit !== undefined && hit.name !== hit.id ? `${hit.name} · ${id}` : id;
+    };
+    const ids = [
+      provider.model,
+      ...fromApi.map((item) => item.id),
+      ...(preset?.models ?? []),
+    ];
+    return [...new Set(ids)].map((id) => ({ id, label: labelOf(id) }));
   };
 
   const changeModel = async (provider: ProviderView, model: string) => {
@@ -220,8 +231,8 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                       onChange={(event) => void changeModel(provider, event.target.value)}
                     >
                       {optionsFor(provider).map((item) => (
-                        <option key={item} value={item}>
-                          {item}
+                        <option key={item.id} value={item.id}>
+                          {item.label}
                         </option>
                       ))}
                     </select>

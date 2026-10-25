@@ -289,11 +289,13 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         if (!upstream.ok) {
           throw new Error(`上游返回 ${upstream.status}`);
         }
-        const payload = (await upstream.json()) as { data?: Array<{ id?: string }> };
+        const payload = (await upstream.json()) as {
+          data?: Array<{ id?: string; name?: string }>;
+        };
         const models = (payload.data ?? [])
-          .map((item) => item.id)
-          .filter((id): id is string => typeof id === "string" && id !== "")
-          .sort();
+          .filter((item) => typeof item.id === "string" && item.id !== "")
+          .map((item) => ({ id: item.id as string, name: item.name ?? (item.id as string) }))
+          .sort((a, b) => a.id.localeCompare(b.id));
         response.json({ models });
       } catch (error) {
         throw new HttpError(
@@ -321,11 +323,13 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
           signal: AbortSignal.timeout(15_000),
         });
         if (!upstream.ok) throw new Error(`上游返回 ${upstream.status}`);
-        const payload = (await upstream.json()) as { data?: Array<{ id?: string }> };
+        const payload = (await upstream.json()) as {
+          data?: Array<{ id?: string; name?: string }>;
+        };
         const models = (payload.data ?? [])
-          .map((item) => item.id)
-          .filter((id): id is string => typeof id === "string" && id !== "")
-          .sort();
+          .filter((item) => typeof item.id === "string" && item.id !== "")
+          .map((item) => ({ id: item.id as string, name: item.name ?? (item.id as string) }))
+          .sort((a, b) => a.id.localeCompare(b.id));
         response.json({ models });
       } catch (error) {
         throw new HttpError(
