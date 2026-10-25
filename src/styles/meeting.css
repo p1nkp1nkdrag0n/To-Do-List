@@ -1100,3 +1100,164 @@
 .llm-grid input.locked {
   color: var(--muted);
 }
+
+/* ── 模型选择（列表式，简化版） ─────────────────────────── */
+.llm-panel-narrow {
+  width: min(520px, 92vw);
+  height: min(560px, 84vh);
+}
+
+.llm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.llm-row.on {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  background: color-mix(in srgb, var(--blue) 5%, var(--surface));
+}
+
+.llm-row-main {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.llm-row-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.llm-row-title em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.llm-row-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.llm-row-check {
+  color: var(--blue);
+}
+
+.llm-row-key {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 11px;
+}
+
+.llm-row-key input {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.llm-add-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.llm-add-row:hover {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  color: var(--ink);
+}
+
+.llm-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.llm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.llm-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.llm-chip.on {
+  border-color: color-mix(in srgb, var(--blue) 50%, var(--line));
+  color: var(--ink);
+  background: color-mix(in srgb, var(--blue) 7%, var(--surface));
+}
+
+.llm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-field input,
+.llm-field select {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.llm-field input.locked {
+  color: var(--muted);
+}
+
+.llm-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.llm-foot-plain {
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+}

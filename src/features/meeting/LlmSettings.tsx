@@ -1,13 +1,14 @@
 /**
- * AI 供应商切换面板（cc-switch 风格）：
- * 左边一列供应商，右边编辑；选模板自动带出地址与模型，只让用户填 Key。
+ * 模型选择（照 Harness 账号设置里「模型」那一页的样子）：
+ * 一列可选模型，点一下就是当前使用；没有 key 的才需要填一次。
+ * 新增入口在底部，点开才出预设，平时不占地方。
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { Check, Lock, Plus, Trash2, Zap } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 
 import { api, errorMessage } from "../../lib/api";
-import { LLM_PRESETS, presetByBaseUrl, presetByKey, type LlmPreset } from "./llm-presets";
+import { LLM_PRESETS, presetByBaseUrl, type LlmPreset } from "./llm-presets";
 
 interface ProviderView {
   id: string;
@@ -26,99 +27,41 @@ interface LlmConfigView {
   envAvailable: boolean;
 }
 
-const EMPTY_FORM = { name: "", baseUrl: "", model: "", apiKey: "" };
-
 export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [view, setView] = useState<LlmConfigView>();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  /** 当前正在套用的模板；自定义时为 undefined。 */
-  const [preset, setPreset] = useState<LlmPreset | undefined>();
-  const [creating, setCreating] = useState(false);
+  const [pendingKey, setPendingKey] = useState("");
+  const [needKeyFor, setNeedKeyFor] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
 
-  const applyProvider = useCallback((provider: ProviderView) => {
-    setSelectedId(provider.id);
-    setForm({
-      name: provider.name,
-      baseUrl: provider.baseUrl,
-      model: provider.model,
-      apiKey: "",
-    });
-    setPreset(presetByBaseUrl(provider.baseUrl));
-    setMessage("");
-  }, []);
-
-  const load = useCallback(
-    async (keepSelection?: string) => {
-      try {
-        const next = await api.get<LlmConfigView>("/api/meeting/llm-config");
-        setView(next);
-        const target = keepSelection ?? selectedId ?? next.activeId ?? next.providers[0]?.id ?? null;
-        setSelectedId(target);
-        const provider = next.providers.find((item) => item.id === target);
-        if (provider !== undefined) applyProvider(provider);
-      } catch (caught) {
-        setMessage(errorMessage(caught));
-      }
-    },
-    [applyProvider, selectedId],
-  );
-
-  useEffect(() => {
-    if (open) void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const selected = view?.providers.find((item) => item.id === selectedId);
-
-  const startCreate = (presetKey: string) => {
-    const next = presetByKey(presetKey);
-    if (next === undefined) return;
-    setCreating(true);
-    setSelectedId(null);
-    setPreset(next.freeform === true ? undefined : next);
-    setForm({
-      name: next.name,
-      baseUrl: next.baseUrl,
-      model: next.models[0] ?? "",
-      apiKey: "",
-    });
-    setMessage("");
-  };
-
-  const save = async () => {
-    setBusy("保存中…");
-    setMessage("");
+  const load = useCallback(async () => {
     try {
-      if (creating) {
-        await api.post("/api/meeting/llm/providers", form);
-      } else if (selectedId !== null) {
-        await api.put(`/api/meeting/llm/providers/${selectedId}`, form);
-      }
       const next = await api.get<LlmConfigView>("/api/meeting/llm-config");
       setView(next);
-      setCreating(false);
-      const target = next.activeId ?? next.providers[0]?.id ?? null;
-      const provider = next.providers.find((item) => item.id === target);
-      if (provider !== undefined) applyProvider(provider);
-      setMessage("已保存");
     } catch (caught) {
       setMessage(errorMessage(caught));
-    } finally {
-      setBusy("");
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setAdding(false);
+      setNeedKeyFor(null);
+      setPendingKey("");
+      setMessage("");
+      void load();
+    }
+  }, [open, load]);
 
   const activate = async (id: string) => {
     setBusy("切换中…");
+    setMessage("");
     try {
       const next = await api.post<LlmConfigView>(`/api/meeting/llm/providers/${id}/activate`);
       setView(next);
-      const provider = next.providers.find((item) => item.id === id);
-      if (provider !== undefined) applyProvider(provider);
-      setMessage("已切换，之后都用它");
+      setNeedKeyFor(null);
+      setMessage("已切换");
     } catch (caught) {
       setMessage(errorMessage(caught));
     } finally {
@@ -126,28 +69,39 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
     }
   };
 
-  const test = async (id: string) => {
-    setBusy("测试中…");
-    setMessage("");
-    try {
-      const result = await api.post<{ latencyMs: number; model: string }>(
-        `/api/meeting/llm/providers/${id}/test`,
-      );
-      setMessage(`连接正常：${result.model}，${result.latencyMs}ms`);
-    } catch (caught) {
-      setMessage(errorMessage(caught));
-    } finally {
-      setBusy("");
+  const saveKeyAndUse = async (provider: ProviderView) => {
+    if (pendingKey.trim() === "") {
+      setMessage("请先粘贴 API Key");
+      return;
     }
-  };
-
-  const remove = async (id: string) => {
-    setBusy("删除中…");
+    setBusy("保存中…");
     try {
-      await api.delete(`/api/meeting/llm/providers/${id}`, {});
-      setSelectedId(null);
+      await api.put(`/api/meeting/llm/providers/${provider.id}`, { apiKey: pendingKey.trim() });
+      await api.post(`/api/meeting/llm/providers/${provider.id}/activate`);
+      setPendingKey("");
+      setNeedKeyFor(null);
       await load();
-      setMessage("已删除");
+      setMessage("已保存并切换");
+    } catch (caught) {
+      setMessage(errorMessage(caught));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const addProvider = async (preset: LlmPreset, apiKey: string, model: string) => {
+    setBusy("添加中…");
+    try {
+      await api.post("/api/meeting/llm/providers", {
+        name: preset.name,
+        baseUrl: preset.baseUrl,
+        model,
+        apiKey,
+      });
+      setAdding(false);
+      setPendingKey("");
+      await load();
+      setMessage("已添加");
     } catch (caught) {
       setMessage(errorMessage(caught));
     } finally {
@@ -157,196 +111,193 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
 
   if (!open) return null;
 
-  const locked = preset !== undefined && preset.freeform !== true;
-  const models = preset?.models ?? [];
-  const canSave = form.name.trim() !== "" && form.baseUrl.trim() !== "" && form.model.trim() !== "";
-
   return (
     <div className="llm-mask" role="dialog" aria-modal="true">
-      <div className="llm-panel">
+      <div className="llm-panel llm-panel-narrow">
         <header className="llm-head">
           <div>
-            <strong>AI 供应商</strong>
-            <span>选一个模板，填 Key 就能用；点一下切换当前使用</span>
+            <strong>模型</strong>
+            <span>选择一个用来处理会议纪要的大模型</span>
           </div>
           <button className="icon-button" type="button" aria-label="关闭" onClick={onClose}>
-            ×
+            <X size={16} />
           </button>
         </header>
 
-        <div className="llm-body">
-          <aside className="llm-list">
-            {view?.providers.length === 0 ? (
-              <p className="llm-empty">还没有供应商，右边先加一个。</p>
-            ) : null}
-            {view?.providers.map((provider) => (
-              <button
-                key={provider.id}
-                type="button"
-                className={`llm-item ${provider.id === selectedId && !creating ? "on" : ""}`}
-                onClick={() => {
-                  setCreating(false);
-                  applyProvider(provider);
-                }}
-              >
-                <span className="llm-item-name">
-                  {provider.active ? <Check size={13} /> : null}
-                  {provider.name}
-                </span>
-                <span className="llm-item-host">
-                  {provider.model} · {hostOf(provider.baseUrl)}
-                </span>
-              </button>
-            ))}
-
-            <div className="llm-list-foot">
-              <div className="llm-add-title">
-                <Plus size={13} /> 添加供应商
-              </div>
-              <div className="llm-add-grid">
-                {LLM_PRESETS.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className="llm-preset"
-                    onClick={() => startCreate(item.key)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </aside>
-
-          <section className="llm-form">
-            {creating ? null : (
-              <p className="llm-current">
-                正在编辑：<strong>{selected?.name ?? "—"}</strong>
-                {selected?.active === true ? <span className="llm-active-tag">当前使用中</span> : null}
-              </p>
-            )}
-            {preset?.note !== undefined ? <p className="llm-note">{preset.note}</p> : null}
-            {view?.envAvailable ? (
-              <p className="llm-note">
-                环境变量里也配了 key；页面里选中的供应商优先，环境变量只做兜底。
-              </p>
-            ) : null}
-
-            <div className="llm-grid">
-              <label>
-                名称
-                <input
-                  value={form.name}
-                  placeholder="例如 DeepSeek"
-                  readOnly={locked}
-                  className={locked ? "locked" : ""}
-                  onChange={(event) => setForm((c) => ({ ...c, name: event.target.value }))}
-                />
-              </label>
-              <label>
-                接口地址
-                {locked ? (
-                  <span className="llm-locked-line">
-                    <Lock size={12} /> {form.baseUrl}
-                  </span>
-                ) : (
-                  <input
-                    value={form.baseUrl}
-                    placeholder="https://api.deepseek.com"
-                    onChange={(event) => setForm((c) => ({ ...c, baseUrl: event.target.value }))}
-                  />
-                )}
-              </label>
-              <label>
-                模型
-                {locked && models.length > 0 ? (
-                  <select
-                    value={form.model}
-                    onChange={(event) => setForm((c) => ({ ...c, model: event.target.value }))}
-                  >
-                    {models.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                      </option>
-                    ))}
-                    {models.includes(form.model) ? null : (
-                      <option value={form.model}>{form.model}</option>
-                    )}
-                  </select>
-                ) : (
-                  <input
-                    value={form.model}
-                    placeholder="deepseek-chat"
-                    onChange={(event) => setForm((c) => ({ ...c, model: event.target.value }))}
-                  />
-                )}
-              </label>
-              <label>
-                API Key
-                <input
-                  type="password"
-                  value={form.apiKey}
-                  placeholder={
-                    selected?.hasKey === true ? `已保存 ${selected.keyHint}（留空不改）` : "粘贴你的 Key"
-                  }
-                  onChange={(event) => setForm((c) => ({ ...c, apiKey: event.target.value }))}
-                />
-              </label>
-            </div>
-
-            <footer className="llm-foot">
-              <span className="llm-status">{message}</span>
-              {selected !== undefined && !creating ? (
-                <>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={busy !== ""}
-                    onClick={() => void test(selected.id)}
-                  >
-                    测试
-                  </button>
-                  {!selected.active ? (
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      disabled={busy !== ""}
-                      onClick={() => void activate(selected.id)}
-                    >
-                      <Zap size={13} /> 设为当前
-                    </button>
-                  ) : null}
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="删除"
-                    disabled={busy !== ""}
-                    onClick={() => void remove(selected.id)}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </>
+        <div className="llm-scroll">
+          {adding ? (
+            <AddProvider
+              busy={busy !== ""}
+              onCancel={() => setAdding(false)}
+              onAdd={(preset, key, model) => void addProvider(preset, key, model)}
+            />
+          ) : (
+            <>
+              {view === undefined ? <p className="llm-empty">读取中…</p> : null}
+              {view?.providers.length === 0 ? (
+                <p className="llm-empty">还没有模型，点下面「添加模型」开始。</p>
               ) : null}
-              <button
-                className="primary-button"
-                type="button"
-                disabled={busy !== "" || !canSave}
-                onClick={() => void save()}
-              >
-                {creating ? "添加" : "保存"}
+              {view?.providers.map((provider) => (
+                <div key={provider.id} className={`llm-row ${provider.active ? "on" : ""}`}>
+                  <button
+                    type="button"
+                    className="llm-row-main"
+                    onClick={() => {
+                      if (!provider.hasKey) {
+                        setNeedKeyFor(provider.id === needKeyFor ? null : provider.id);
+                        return;
+                      }
+                      if (!provider.active) void activate(provider.id);
+                    }}
+                  >
+                    <span className="llm-row-title">
+                      {provider.name}
+                      <em>{provider.model}</em>
+                    </span>
+                    <span className="llm-row-meta">
+                      {provider.hasKey ? provider.keyHint : "未填 Key"}
+                    </span>
+                    {provider.active ? <Check className="llm-row-check" size={16} /> : null}
+                  </button>
+
+                  {needKeyFor === provider.id ? (
+                    <div className="llm-row-key">
+                      <input
+                        type="password"
+                        autoFocus
+                        placeholder="粘贴 API Key，回车保存"
+                        value={pendingKey}
+                        onChange={(event) => setPendingKey(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void saveKeyAndUse(provider);
+                        }}
+                      />
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={busy !== ""}
+                        onClick={() => void saveKeyAndUse(provider)}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+
+              <button className="llm-add-row" type="button" onClick={() => setAdding(true)}>
+                <Plus size={15} /> 添加模型
               </button>
-            </footer>
-          </section>
+
+              {view?.envAvailable === true ? (
+                <p className="llm-note">
+                  环境变量里也配了 Key；这里选中的模型优先，环境变量只做兜底。
+                </p>
+              ) : null}
+            </>
+          )}
         </div>
+
+        <footer className="llm-foot llm-foot-plain">
+          <span className="llm-status">{message}</span>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            完成
+          </button>
+        </footer>
       </div>
     </div>
   );
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
+function AddProvider({
+  busy,
+  onCancel,
+  onAdd,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onAdd: (preset: LlmPreset, apiKey: string, model: string) => void;
+}) {
+  const [presetKey, setPresetKey] = useState<string>("deepseek");
+  const [model, setModel] = useState<string>("deepseek-chat");
+  const [apiKey, setApiKey] = useState("");
+
+  const preset = LLM_PRESETS.find((item) => item.key === presetKey) ?? LLM_PRESETS[0]!;
+  const freeform = preset.freeform === true;
+
+  return (
+    <div className="llm-add-form">
+      <p className="llm-add-title">添加模型</p>
+      <div className="llm-chips">
+        {LLM_PRESETS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`llm-chip ${item.key === presetKey ? "on" : ""}`}
+            onClick={() => {
+              setPresetKey(item.key);
+              setModel(item.models[0] ?? "");
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <label className="llm-field">
+        接口地址
+        <input value={preset.baseUrl} readOnly className="locked" placeholder="https://..." />
+      </label>
+
+      <label className="llm-field">
+        模型
+        {freeform ? (
+          <input
+            value={model}
+            placeholder="模型名"
+            onChange={(event) => setModel(event.target.value)}
+          />
+        ) : (
+          <select value={model} onChange={(event) => setModel(event.target.value)}>
+            {preset.models.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        )}
+      </label>
+
+      <label className="llm-field">
+        API Key
+        <input
+          type="password"
+          value={apiKey}
+          placeholder="粘贴你的 Key"
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+      </label>
+
+      {preset.note !== undefined ? <p className="llm-note">{preset.note}</p> : null}
+
+      <div className="llm-add-actions">
+        <button className="secondary-button" type="button" onClick={onCancel}>
+          取消
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy || model.trim() === ""}
+          onClick={() => onAdd(preset, apiKey.trim(), model.trim())}
+        >
+          添加
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 供外部判断某地址对应哪个预设（目前没用到，保留给以后编辑）。 */
+export function presetOf(baseUrl: string): LlmPreset | undefined {
+  return presetByBaseUrl(baseUrl);
 }
