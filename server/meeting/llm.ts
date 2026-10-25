@@ -16,9 +16,9 @@ export interface LlmConfig {
   provider: string;
 }
 
-export function llmFromEnv(): LlmConfig | null {
-  // 1) 页面里选中的供应商优先（像 cc-switch：选谁用谁）
-  const provider = activeProvider();
+export function llmFromEnv(userId?: string): LlmConfig | null {
+  // 1) 这个用户自己选中的供应商优先
+  const provider = userId !== undefined ? activeProvider(userId) : undefined;
   if (provider !== undefined) {
     return {
       apiKey: provider.apiKey,
@@ -28,8 +28,10 @@ export function llmFromEnv(): LlmConfig | null {
     };
   }
 
-  // 2) 环境变量兜底（部署 / CI 用）
-  const envKey = envApiKey();
+  // 2) 服务器默认 Key 只作为显式开启的兜底：
+  //    发布给别人用时，每个人必须配自己的 Key，不能白烧部署者的额度。
+  const allowShared = process.env.LLM_ALLOW_SHARED_FALLBACK === "1";
+  const envKey = allowShared ? envApiKey() : undefined;
   if (envKey !== undefined) {
     return {
       apiKey: envKey,

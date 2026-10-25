@@ -14,7 +14,13 @@ import path from "node:path";
 
 import { z } from "zod";
 
-const CONFIG_PATH = path.join(process.cwd(), "data", "v2", "llm-config.json");
+const CONFIG_DIR = path.join(process.cwd(), "data", "v2", "llm");
+/** 老版本的单文件配置，第一次读时迁移给它的主人。 */
+const LEGACY_PATH = path.join(process.cwd(), "data", "v2", "llm-config.json");
+
+function configPath(userId: string): string {
+  return path.join(CONFIG_DIR, `${userId}.json`);
+}
 
 export const ProviderSchema = z
   .object({
@@ -70,10 +76,10 @@ function emptyConfig(): LlmConfigFile {
   return { version: 2, activeId: null, providers: [] };
 }
 
-export function readConfig(): LlmConfigFile {
+export function readConfig(userId: string): LlmConfigFile {
   let raw: string;
   try {
-    raw = fs.readFileSync(CONFIG_PATH, "utf8");
+    raw = fs.readFileSync(configPath(userId), "utf8");
   } catch {
     return emptyConfig();
   }
@@ -98,7 +104,7 @@ export function readConfig(): LlmConfigFile {
           },
         ],
       };
-      writeConfig(migrated);
+      writeConfig(userId, migrated);
       return migrated;
     }
   } catch {
@@ -107,12 +113,53 @@ export function readConfig(): LlmConfigFile {
   return emptyConfig();
 }
 
-export function writeConfig(config: LlmConfigFile): void {
-  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
+export function writeConfig(userId: string, config: LlmConfigFile): void {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(configPath(userId), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
-export function activeProvider(config = readConfig()): ProviderRecord | undefined {
+/**
+ * 把老版本的单文件配置搬给部署者（默认 qyhsktn），搬完删掉全局文件。
+ * 只在启动时跑一次：别人登录时不会“捡到”部署者的 Key。
+ */
+export function migrateLegacyConfigToOwner(ownerUserId: string): boolean {
+  try {
+    const raw = fs.readFileSync(LEGACY_PATH, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    const v2 = LlmConfigFileSchema.safeParse(parsed);
+    let migrated: LlmConfigFile | undefined;
+    if (v2.success) {
+      migrated = v2.data;
+    } else {
+      const legacy = LegacySchema.safeParse(parsed);
+      if (legacy.success && legacy.data.apiKey !== "") {
+        migrated = {
+          version: 2,
+          activeId: "p_migrated",
+          providers: [
+            {
+              id: "p_migrated",
+              name: legacy.data.provider,
+              baseUrl: legacy.data.baseUrl,
+              model: legacy.data.model,
+              apiKey: legacy.data.apiKey,
+            },
+          ],
+        };
+      }
+    }
+    if (migrated !== undefined) {
+      writeConfig(ownerUserId, migrated);
+      fs.rmSync(LEGACY_PATH, { force: true });
+      return true;
+    }
+  } catch {
+    // 没有旧文件就正常返回。
+  }
+  return false;
+}
+
+export function activeProvider(userId: string, config = readConfig(userId)): ProviderRecord | undefined {
   if (config.activeId === null) return undefined;
   return config.providers.find((item) => item.id === config.activeId);
 }
@@ -123,14 +170,12 @@ function assertKeyLooksValid(apiKey: string): void {
   }
 }
 
-export function createProvider(input: {
-  name: string;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-}): ProviderRecord {
+export function createProvider(
+  userId: string,
+  input: { name: string; baseUrl: string; model: string; apiKey: string },
+): ProviderRecord {
   assertKeyLooksValid(input.apiKey);
-  const config = readConfig();
+  const config = readConfig(userId);
   const provider: ProviderRecord = {
     id: `p_${randomUUID().slice(0, 8)}`,
     name: input.name,
@@ -140,15 +185,16 @@ export function createProvider(input: {
   };
   config.providers.push(provider);
   if (config.activeId === null) config.activeId = provider.id;
-  writeConfig(config);
+  writeConfig(userId, config);
   return provider;
 }
 
 export function updateProvider(
+  userId: string,
   id: string,
   input: { name?: string; baseUrl?: string; model?: string; apiKey?: string },
 ): ProviderRecord | undefined {
-  const config = readConfig();
+  const config = readConfig(userId);
   const index = config.providers.findIndex((item) => item.id === id);
   if (index < 0) return undefined;
   if (input.apiKey !== undefined && input.apiKey.trim() !== "") {
@@ -167,27 +213,27 @@ export function updateProvider(
         : current.apiKey,
   };
   config.providers[index] = next;
-  writeConfig(config);
+  writeConfig(userId, config);
   return next;
 }
 
-export function deleteProvider(id: string): boolean {
-  const config = readConfig();
+export function deleteProvider(userId: string, id: string): boolean {
+  const config = readConfig(userId);
   const before = config.providers.length;
   config.providers = config.providers.filter((item) => item.id !== id);
   if (config.providers.length === before) return false;
   if (config.activeId === id) {
     config.activeId = config.providers[0]?.id ?? null;
   }
-  writeConfig(config);
+  writeConfig(userId, config);
   return true;
 }
 
-export function activateProvider(id: string): boolean {
-  const config = readConfig();
+export function activateProvider(userId: string, id: string): boolean {
+  const config = readConfig(userId);
   if (!config.providers.some((item) => item.id === id)) return false;
   config.activeId = id;
-  writeConfig(config);
+  writeConfig(userId, config);
   return true;
 }
 
@@ -201,9 +247,9 @@ export function mask(key: string): string {
   return key.length <= 4 ? "****" : `****${key.slice(-4)}`;
 }
 
-export function configView(): LlmConfigView {
-  const config = readConfig();
-  const envKey = envApiKey();
+export function configView(userId: string): LlmConfigView {
+  const config = readConfig(userId);
+  const envKey = process.env.LLM_ALLOW_SHARED_FALLBACK === "1" ? envApiKey() : undefined;
   const providers: ProviderView[] = config.providers.map((item) => ({
     id: item.id,
     name: item.name,

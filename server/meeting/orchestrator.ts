@@ -36,6 +36,8 @@ export interface OrchestratorOptions {
   control?: MeetingControl;
   /** 负责人不可替换：只允许延期 / 平移，不允许换人或拆分。 */
   lockOwners?: boolean;
+  /** 触发这次处理的用户；决定用谁的模型 Key。 */
+  actingUserId?: string;
 }
 
 interface PlanSummary {
@@ -415,7 +417,7 @@ export class MeetingOrchestrator {
       const names = [...memberByName.keys()];
 
       // 2. 抽取
-      const extraction = await extractTasksFromText(minutes, names);
+      const extraction = await extractTasksFromText(minutes, names, this.options.actingUserId);
       this.emit({
         type: "tool.call",
         at: new Date().toISOString(),

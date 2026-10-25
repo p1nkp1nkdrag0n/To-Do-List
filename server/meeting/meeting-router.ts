@@ -118,6 +118,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
         paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),
         lockOwners: lockOwners ?? false,
+        actingUserId: auth.user.id,
         onEvent(event) {
           dependencies.publishMeetingEvent?.(projectId, {
             type: event.type,
@@ -215,7 +216,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
 
   /** 读全部供应商（key 只回显末四位，外加“当前是哪个”）。 */
   router.get("/llm-config", (_request, response) => {
-    response.json(configView());
+    response.json(configView(response.locals.auth.user.id));
   });
 
   /** 新增一个供应商；第一个自动设为当前。 */
@@ -231,8 +232,8 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         .strict(),
       request,
     );
-    const created = createProvider(input);
-    response.status(201).json({ id: created.id, ...configView() });
+    const created = createProvider(response.locals.auth.user.id, input);
+    response.status(201).json({ id: created.id, ...configView(response.locals.auth.user.id) });
   });
 
   /** 改一个供应商；apiKey 留空表示不改。 */
@@ -248,26 +249,30 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         .strict(),
       request,
     );
-    const updated = updateProvider(String(request.params.id), input);
+    const updated = updateProvider(
+      response.locals.auth.user.id,
+      String(request.params.id),
+      input,
+    );
     if (updated === undefined) {
       throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
     }
-    response.json(configView());
+    response.json(configView(response.locals.auth.user.id));
   });
 
   router.delete("/llm/providers/:id", (request, response) => {
-    if (!deleteProvider(String(request.params.id))) {
+    if (!deleteProvider(response.locals.auth.user.id, String(request.params.id))) {
       throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
     }
-    response.json(configView());
+    response.json(configView(response.locals.auth.user.id));
   });
 
   /** 切换当前供应商 —— cc-switch 的核心动作。 */
   router.post("/llm/providers/:id/activate", (request, response) => {
-    if (!activateProvider(String(request.params.id))) {
+    if (!activateProvider(response.locals.auth.user.id, String(request.params.id))) {
       throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
     }
-    response.json(configView());
+    response.json(configView(response.locals.auth.user.id));
   });
 
   /** 拉取这个地址下 Key 可用的模型列表（各大平台都是 OpenAI 兼容的 /models）。 */
@@ -311,7 +316,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/llm/providers/:id/models",
     asyncRoute(async (request, response) => {
-      const provider = readConfig().providers.find(
+      const provider = readConfig(response.locals.auth.user.id).providers.find(
         (item) => item.id === String(request.params.id),
       );
       if (provider === undefined) {
@@ -343,7 +348,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
 
   /** 用某个供应商发一次最小请求，验证 key 是否可用。 */
   router.post("/llm/providers/:id/test", asyncRoute(async (request, response) => {
-    const provider = readConfig().providers.find(
+    const provider = readConfig(response.locals.auth.user.id).providers.find(
       (item) => item.id === String(request.params.id),
     );
     if (provider === undefined) {

@@ -269,7 +269,8 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
 
               {view?.envAvailable === true ? (
                 <p className="llm-note">
-                  环境变量里也配了 Key；这里选中的模型优先，环境变量只做兜底。
+                  服务器还配了一个默认 Key（环境变量）。你自己的模型优先；没有配时才用它——
+                  多人共用时请各自添加自己的 Key，否则会消耗部署者的额度。
                 </p>
               ) : null}
             </>

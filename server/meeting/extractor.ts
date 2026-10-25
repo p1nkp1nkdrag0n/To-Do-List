@@ -120,9 +120,10 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
 export async function extractTasksFromText(
   text: string,
   memberNames: string[],
+  userId?: string,
 ): Promise<ExtractionResult> {
   const warnings: string[] = [];
-  const config = llmFromEnv();
+  const config = llmFromEnv(userId);
 
   if (config !== null) {
     try {
