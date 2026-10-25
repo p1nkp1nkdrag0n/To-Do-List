@@ -42,6 +42,20 @@ export function llmFromEnv(): LlmConfig | null {
   return null;
 }
 
+/** 有些供应商会把 JSON 包在 ```json 里，或者前后带一句解释，这里都剥掉。 */
+function extractJson(raw: string): unknown {
+  const trimmed = raw.trim();
+  const fenced = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  try {
+    return JSON.parse(fenced);
+  } catch {
+    const start = fenced.indexOf("{");
+    const end = fenced.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(fenced.slice(start, end + 1));
+    throw new Error("模型没有返回合法 JSON");
+  }
+}
+
 export interface ChatJsonOptions {
   config: LlmConfig;
   system: string;
@@ -109,7 +123,7 @@ export async function chatJson(options: ChatJsonOptions): Promise<ChatJsonResult
         choices?: Array<{ message?: { content?: string } }>;
       };
       lastRaw = payload.choices?.[0]?.message?.content ?? "";
-      const parsed = JSON.parse(lastRaw) as unknown;
+      const parsed = extractJson(lastRaw);
       const checked = schema.safeParse(parsed);
       if (!checked.success) {
         lastError = checked.error.issues.map((issue) => issue.path.join(".") + ":" + issue.message);

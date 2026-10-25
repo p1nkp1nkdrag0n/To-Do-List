@@ -691,7 +691,7 @@ export function MeetingView({
                 先清空本项目排期
               </label>
               <span className="meeting-modal-hint">
-                会先用 DeepSeek 抽任务；没有 key 时自动退回规则解析。
+                会先用当前选择的大模型抽任务；没有 key 时自动退回规则解析。
               </span>
               <button className="secondary-button" type="button" onClick={() => setMinutesOpen(false)}>
                 取消

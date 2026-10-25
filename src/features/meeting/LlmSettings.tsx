@@ -74,6 +74,10 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       setMessage("请先粘贴 API Key");
       return;
     }
+    if (pendingKey.includes("://")) {
+      setMessage("这看起来是接口地址，不是 API Key。Key 一般以 sk- 开头。");
+      return;
+    }
     setBusy("保存中…");
     try {
       await api.put(`/api/meeting/llm/providers/${provider.id}`, { apiKey: pendingKey.trim() });
@@ -90,6 +94,10 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   };
 
   const addProvider = async (preset: LlmPreset, apiKey: string, model: string) => {
+    if (apiKey.includes("://")) {
+      setMessage("这看起来是接口地址，不是 API Key。Key 一般以 sk- 开头。");
+      return;
+    }
     setBusy("添加中…");
     try {
       await api.post("/api/meeting/llm/providers", {
@@ -165,7 +173,7 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                       <input
                         type="password"
                         autoFocus
-                        placeholder="粘贴 API Key，回车保存"
+                        placeholder="API Key（sk- 开头），回车保存"
                         value={pendingKey}
                         onChange={(event) => setPendingKey(event.target.value)}
                         onKeyDown={(event) => {
@@ -273,7 +281,7 @@ function AddProvider({
         <input
           type="password"
           value={apiKey}
-          placeholder="粘贴你的 Key"
+          placeholder="Key 一般以 sk- 开头"
           onChange={(event) => setApiKey(event.target.value)}
         />
       </label>

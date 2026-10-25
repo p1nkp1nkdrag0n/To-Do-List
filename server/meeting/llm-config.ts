@@ -117,12 +117,19 @@ export function activeProvider(config = readConfig()): ProviderRecord | undefine
   return config.providers.find((item) => item.id === config.activeId);
 }
 
+function assertKeyLooksValid(apiKey: string): void {
+  if (apiKey.includes("://")) {
+    throw new Error("这看起来是接口地址，不是 API Key。Key 一般以 sk- 开头。");
+  }
+}
+
 export function createProvider(input: {
   name: string;
   baseUrl: string;
   model: string;
   apiKey: string;
 }): ProviderRecord {
+  assertKeyLooksValid(input.apiKey);
   const config = readConfig();
   const provider: ProviderRecord = {
     id: `p_${randomUUID().slice(0, 8)}`,
@@ -144,6 +151,9 @@ export function updateProvider(
   const config = readConfig();
   const index = config.providers.findIndex((item) => item.id === id);
   if (index < 0) return undefined;
+  if (input.apiKey !== undefined && input.apiKey.trim() !== "") {
+    assertKeyLooksValid(input.apiKey.trim());
+  }
   const current = config.providers[index]!;
   const next: ProviderRecord = {
     ...current,
