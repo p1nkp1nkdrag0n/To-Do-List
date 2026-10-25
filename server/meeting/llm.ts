@@ -76,6 +76,7 @@ export async function chatJson(options: ChatJsonOptions): Promise<ChatJsonResult
   const timeoutMs = options.timeoutMs ?? 30_000;
   let lastError: unknown;
   let lastRaw = "";
+  let jsonMode = true;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const controller = new AbortController();
@@ -99,7 +100,9 @@ export async function chatJson(options: ChatJsonOptions): Promise<ChatJsonResult
                   : `${user}\n\n上次的输出不符合要求，错误：${String(lastError)}。请只返回合法 JSON。`,
             },
           ],
-          response_format: { type: "json_object" },
+          // 部分供应商（Kimi 的旧模型等）不支持 json_object，会直接 400；
+          // 这时退一步，用纯文本指令约束，再自己抽 JSON。
+          ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
           temperature: 0.1,
           max_tokens: 2_000,
         }),
@@ -114,6 +117,13 @@ export async function chatJson(options: ChatJsonOptions): Promise<ChatJsonResult
         if (response.status === 429) {
           throw new Error("大模型调用太频繁或额度不足，稍等一会儿再试。");
         }
+        if ((response.status === 400 || response.status === 422) && jsonMode) {
+          clearTimeout(timer);
+          jsonMode = false;
+          lastError = new Error(body.slice(0, 200));
+          continue;
+        }
+        console.error(`[llm] ${config.provider}/${config.model} 返回 ${response.status}: ${body.slice(0, 300)}`);
         throw new Error(
           `大模型服务返回 ${response.status}：${body.slice(0, 160)}`,
         );

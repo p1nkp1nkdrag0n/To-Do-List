@@ -605,8 +605,12 @@ export function MeetingView({
             <button
               type="button"
               className="secondary-button"
-              disabled={manualBusy !== "" || !undoAvailable}
-              title={undoAvailable ? "把排期退回自动调整之前" : "没有可撤销的调整"}
+              disabled={manualBusy !== "" || (!undoAvailable && run?.appliedPlanId == null)}
+              title={
+                undoAvailable || run?.appliedPlanId != null
+                  ? "把排期退回自动调整之前"
+                  : "这次没有触发自动调整，没有可撤销的内容"
+              }
               onClick={() => void handleUndo()}
             >
               <RotateCcw size={14} /> 撤销本次调整
@@ -710,6 +714,8 @@ export function MeetingView({
       ) : null}
 
       <LlmSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {notice !== "" ? <div className="meeting-notice">{notice}</div> : null}
 
       <div className="meeting-body">
         <section className="meeting-pane meeting-main">
