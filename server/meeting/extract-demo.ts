@@ -20,6 +20,8 @@ const SAMPLE = `周会纪要
 邱业恒：会议录音脚本和话术我来写，四个钟头，这周末前。
 邱业恒：最后彩排和录屏我来，四个钟头，下周三之前。`;
 
+// 命令行工具没有登录用户，这里显式允许用 .env 里的 Key（服务端默认不开）。
+process.env.LLM_ALLOW_SHARED_FALLBACK ??= "1";
 loadEnvFile();
 
 const file = process.argv[2];

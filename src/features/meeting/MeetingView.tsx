@@ -55,12 +55,13 @@ interface MeetingViewProps {
 
 const LINE_INTERVAL_MS = 850;
 
-const DEMO_MINUTES = `周会纪要
-邱业恒：今天主要三件事，接口、甘特图、彩排。
-张工：MCP 工具层接口联调我来接，大概十个钟头，这周五之前搞定。我周三下午请假。
-李工：甘特图和冲突面板我来调，八个钟头，等张工接口好了我才能开始。
-邱业恒：会议录音脚本和话术我来写，四个钟头，这周末前。
-邱业恒：最后彩排和录屏我来，四个钟头，下周三之前。`;
+const DEMO_MINUTES = `周末露营筹备 · 分工小会
+甲：这次就四件事，订营地、买装备、写攻略、剪视频。
+甲：营地我来订，两个小时，这周五之前定下来。
+乙：装备清单和采购我来，四个小时，等甲订好营地我再下单。
+丙：路线和攻略我写，三个小时，周六之前给大家。
+丁：拍照和剪视频我来，五个小时，下周一之前在群里发。
+乙：对了，我周五晚上加班，别给我排那天的活。`;
 /** 运行结果按项目存在 sessionStorage 里，切到甘特图再回来不会丢。 */
 const LAST_RUN_KEY = "meeting.lastRun.v2";
 
@@ -652,7 +653,7 @@ export function MeetingView({
             </div>
             <textarea
               value={minutesText}
-              placeholder="把会议纪要贴进来，例如：&#10;张工：MCP 接口联调，十个钟头，这周五前。&#10;李工：甘特图联调，八个钟头，等张工接口好了再开始。"
+              placeholder="把会议纪要贴进来，例如：&#10;甲：营地我来订，两个小时，这周五前。&#10;乙：装备清单和采购我来，四个小时，等甲订好营地我再下单。&#10;丙：路线和攻略我写，三个小时，周六前。"
               onChange={(event) => setMinutesText(event.target.value)}
             />
             <div className="meeting-modal-foot">
