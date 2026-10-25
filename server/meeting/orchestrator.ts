@@ -444,9 +444,11 @@ export class MeetingOrchestrator {
       // 3. 建任务 + 派人
       const created: Array<{ task: ExtractedTask; taskId: string }> = [];
       let adjustedDates = 0;
+      let unassignedCount = 0;
       for (const task of extraction.tasks) {
-        const userId = memberByName.get(task.ownerName);
-        if (userId === undefined) continue;
+        const userId =
+          task.ownerName === "未分配" ? undefined : memberByName.get(task.ownerName);
+        if (userId === undefined && task.ownerName !== "未分配") continue;
         // 纪要里的日期可能是过去的（比如 4 月的会、写着「5.1 之前」）。
         // 落库前统一挪到未来：过去的日期会让 startDate > dueDate，直接违反约束。
         const rawDue = task.dueDate ?? null;
@@ -462,19 +464,23 @@ export class MeetingOrchestrator {
         const taskId = String(createdTask.payload.taskId ?? "");
         if (taskId === "") continue;
 
-        await this.callTool(
-          client,
-          "assign_member",
-          {
-            projectId,
-            taskId,
-            userId,
-            startDate: today,
-            endDate: dueDate,
-            estimatedHours: task.estimatedHours,
-          },
-          (payload) => String(payload.summary ?? "已分配"),
-        );
+        if (userId !== undefined) {
+          await this.callTool(
+            client,
+            "assign_member",
+            {
+              projectId,
+              taskId,
+              userId,
+              startDate: today,
+              endDate: dueDate,
+              estimatedHours: task.estimatedHours,
+            },
+            (payload) => String(payload.summary ?? "已分配"),
+          );
+        } else {
+          unassignedCount += 1;
+        }
         created.push({ task, taskId });
       }
       if (adjustedDates > 0) {
@@ -490,6 +496,19 @@ export class MeetingOrchestrator {
         });
       }
       this.options.onDataChanged?.(projectId);
+
+      if (unassignedCount > 0) {
+        this.emit({
+          type: "tool.call",
+          at: new Date().toISOString(),
+          tool: "unassigned_tasks",
+          status: "ok",
+          argumentsSummary: `${unassignedCount} 条任务没写负责人`,
+          resultSummary: "已建好，等待手动指派",
+          durationMs: 0,
+          message: `纪要里有 ${unassignedCount} 条任务没写负责人，任务已建好，去甘特图里指派即可`,
+        });
+      }
 
       // 4. 依赖（放在建完之后，按标题匹配）
       for (const item of created) {

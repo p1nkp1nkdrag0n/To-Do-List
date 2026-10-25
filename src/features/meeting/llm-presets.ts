@@ -53,8 +53,8 @@ export const LLM_PRESETS: LlmPreset[] = [
     label: "Kimi（月之暗面）",
     name: "Kimi",
     baseUrl: "https://api.moonshot.cn/v1",
-    models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "kimi-latest"],
-    note: "Kimi 的模型名必须带版本后缀，选错会报 404。",
+    models: ["kimi-k2.6", "kimi-k3", "kimi-k3.1-pro", "kimi-k2.7-code"],
+    note: "Kimi 旧版 moonshot-v1-* 已下线；用「用 Key 拉取可用模型」可以看到你账号实际能用的名字。",
   },
   {
     key: "ollama",

@@ -161,6 +161,14 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
           trimmed === ""
             ? await orchestrator.run()
             : await orchestrator.runFromMinutes(trimmed);
+      } catch (error) {
+        // 编排器抛的是普通 Error，这里转成 400，页面才能显示真实原因。
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(
+          400,
+          "MEETING_RUN_FAILED",
+          error instanceof Error ? error.message : String(error),
+        );
       } finally {
         controls.delete(projectId);
       }
@@ -261,6 +269,41 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     }
     response.json(configView());
   });
+
+  /** 拉取这个地址下 Key 可用的模型列表（各大平台都是 OpenAI 兼容的 /models）。 */
+  router.post(
+    "/llm/models",
+    asyncRoute(async (request, response) => {
+      const { baseUrl, apiKey } = parseRequestBody(
+        z.object({ baseUrl: z.string().url(), apiKey: z.string().min(1).max(200) }).strict(),
+        request,
+      );
+      if (apiKey.includes("://")) {
+        throw new HttpError(400, "INVALID_KEY", "这看起来是接口地址，不是 API Key。");
+      }
+      try {
+        const upstream = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+          headers: { authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!upstream.ok) {
+          throw new Error(`上游返回 ${upstream.status}`);
+        }
+        const payload = (await upstream.json()) as { data?: Array<{ id?: string }> };
+        const models = (payload.data ?? [])
+          .map((item) => item.id)
+          .filter((id): id is string => typeof id === "string" && id !== "")
+          .sort();
+        response.json({ models });
+      } catch (error) {
+        throw new HttpError(
+          400,
+          "MODELS_FAILED",
+          `拉取模型列表失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }),
+  );
 
   /** 用某个供应商发一次最小请求，验证 key 是否可用。 */
   router.post("/llm/providers/:id/test", asyncRoute(async (request, response) => {

@@ -1261,3 +1261,19 @@
   border-top: 1px solid var(--line);
   padding: 10px 14px;
 }
+
+.llm-fetch {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  color: var(--blue);
+  cursor: pointer;
+  padding: 0;
+}
+
+.llm-note-error {
+  color: var(--red);
+  background: var(--red-soft);
+}

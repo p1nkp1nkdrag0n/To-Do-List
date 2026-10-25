@@ -41,8 +41,9 @@ const SYSTEM_PROMPT = [
   "要求：",
   "1. 每个任务一句话，不超过 20 个汉字，动词开头，例如「完成接口联调」。",
   "2. ownerName 照纪要原文写；如果这个人不在成员名单里，也照原样写，不要替换成名单里的其他人。",
+  "2.1 如果纪要只是记录「改了什么」，没有写明谁来做，ownerName 填「未分配」，**不要因此省略这条任务**。",
   "3. estimatedHours 用数字，单位小时；没说工时就按同类任务估一个合理值（4~8）。",
-  "4. dueDate 必须是 YYYY-MM-DD；根据今天的日期和纪要里的「这周」「下周三」「周末」等说法换算。",
+  "4. dueDate 必须是 YYYY-MM-DD；根据今天的日期和纪要里的「这周」「下周三」「周末」等说法换算。纪要没说时间就填 null，不要猜成今天。",
   "5. dependsOnTitle 只有明确说「等谁做完我才能开始」时才填，值必须是另一个任务的 title。",
   "6. 同一件事不要拆成多条重复计工时：如果纪要给的是一件事的总工时（如「仿真这块还要十个钟头」），就只输出一条任务，工时按总数填；只有明确列出多个独立交付物时才拆开，并把总工时分摊，不要每条都填总数。",
   "6. 不要输出解释，只输出 JSON：{\"tasks\":[...]}。",
@@ -138,8 +139,13 @@ export async function extractTasksFromText(
         schema: ExtractionSchema,
       });
       const parsed = result.value as z.infer<typeof ExtractionSchema>;
-      const unknown = parsed.tasks.filter((task) => !memberNames.includes(task.ownerName));
-      const valid = parsed.tasks.filter((task) => memberNames.includes(task.ownerName));
+      const unassigned = parsed.tasks.filter((task) => task.ownerName === "未分配");
+      const unknown = parsed.tasks.filter(
+        (task) => task.ownerName !== "未分配" && !memberNames.includes(task.ownerName),
+      );
+      const valid = parsed.tasks.filter(
+        (task) => task.ownerName === "未分配" || memberNames.includes(task.ownerName),
+      );
       if (unknown.length > 0) {
         const names = [...new Set(unknown.map((task) => task.ownerName))].join("、");
         warnings.push(
