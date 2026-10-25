@@ -37,14 +37,34 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   /** 每个供应商可选的模型（预设 + 从平台拉到的）。 */
   const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
 
+  const syncAll = useCallback(async (providers: ProviderView[]) => {
+    const withKey = providers.filter((item) => item.hasKey);
+    await Promise.all(
+      withKey.map(async (provider) => {
+        try {
+          const result = await api.post<{ models: string[] }>(
+            `/api/meeting/llm/providers/${provider.id}/models`,
+          );
+          if (result.models.length > 0) {
+            setModelOptions((current) => ({ ...current, [provider.id]: result.models }));
+          }
+        } catch {
+          // 平台没开 /models 或没网时静默忽略，继续用内置列表。
+        }
+      }),
+    );
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const next = await api.get<LlmConfigView>("/api/meeting/llm-config");
       setView(next);
+      // 自动跟上平台的新模型：每次打开面板都问一次 /models。
+      void syncAll(next.providers);
     } catch (caught) {
       setMessage(errorMessage(caught));
     }
-  }, []);
+  }, [syncAll]);
 
   useEffect(() => {
     if (open) {
