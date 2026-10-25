@@ -123,6 +123,7 @@
 }
 
 .gantt-table {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -1077,4 +1078,26 @@
 .missing-swatch,
 .overload-swatch {
   border-radius: 3px;
+}
+
+/* 甘特图空状态：还没导入会议纪要时给一句引导 */
+.gantt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.gantt-empty strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.gantt-empty p {
+  max-width: 260px;
+  font-size: 12px;
+  line-height: 1.6;
 }

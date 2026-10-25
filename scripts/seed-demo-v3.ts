@@ -105,6 +105,8 @@ function parseFlags(argv: string[]) {
   return {
     reset: argv.includes("--reset"),
     force: argv.includes("--force"),
+    // 空白开局：只准备成员和可用时间，不预置任务（演示从「上传纪要」开始）
+    blank: argv.includes("--blank"),
   };
 }
 
@@ -402,6 +404,17 @@ async function main(): Promise<void> {
       predecessor: "T3",
     },
   ];
+
+  if (flags.blank) {
+    printHeader("摘要");
+    console.log(`projectId = ${projectId}`);
+    console.log("排期     = 空白（成员与可用时间已就绪）");
+    console.log("下一步   ：在页面「会议」里粘贴或上传会议纪要，任务会从纪要里长出来");
+    console.log(`演示登录：${members.map((m) => `${m.displayName}=${m.username}`).join(" / ")}`);
+    console.log(`新增账号密码：${DEMO_PASSWORD}`);
+    database.close();
+    return;
+  }
 
   const taskIds = new Map<DemoTask["key"], string>();
   for (const task of tasks) {

@@ -428,7 +428,7 @@ export function MeetingView({
     }
   }, [onJumpToGantt, projectId]);
 
-  /** 人工入口：重跑 seed，回到 2 条冲突的开局。 */
+  /** 人工入口：清空排期回到空白开局（seed 模式保留给命令行）。 */
   const handleReset = useCallback(
     async (mode: "seed" | "empty" = "seed") => {
       setManualBusy(mode === "empty" ? "正在清空任务…" : "正在还原演示数据…");
@@ -613,15 +613,6 @@ export function MeetingView({
             <button
               type="button"
               className="secondary-button"
-              disabled={manualBusy !== ""}
-              title="重跑 seed 脚本，回到 2 条冲突的开局"
-              onClick={() => void handleReset()}
-            >
-              <AlertCircle size={14} /> 还原演示数据
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
               onClick={() => void openLlmSettings()}
             >
               <Settings2 size={14} /> AI 设置
@@ -630,10 +621,10 @@ export function MeetingView({
               type="button"
               className="secondary-button"
               disabled={manualBusy !== ""}
-              title="只清空本项目任务，保留成员和可用时间，用来接会议纪要"
+              title="清空本项目排期，回到空白开局（成员和可用时间保留）"
               onClick={() => void handleReset("empty")}
             >
-              <Trash2 size={14} /> 清空任务
+              <Trash2 size={14} /> 清空排期
             </button>
             {manualBusy !== "" ? <span className="meeting-manual-status">{manualBusy}</span> : null}
           </div>
