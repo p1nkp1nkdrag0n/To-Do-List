@@ -168,7 +168,7 @@ export async function extractTasksFromText(
       );
     }
   } else {
-    warnings.push("没有配置 DEEPSEEK_API_KEY，使用规则解析。");
+    warnings.push("还没有配置大模型 Key，先用规则解析。");
   }
 
   return { tasks: extractWithRules(text, memberNames), source: "rules", warnings };

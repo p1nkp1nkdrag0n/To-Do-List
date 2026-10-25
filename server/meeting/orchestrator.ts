@@ -435,7 +435,7 @@ export class MeetingOrchestrator {
         const noKey = extraction.warnings.some((w) => w.includes("没有配置"));
         const hints = [
           noKey
-            ? "当前没有配置大模型 Key，只能用规则解析，规则只认「谁 + 做什么 + 几小时」。"
+            ? "你还没有配置大模型 Key：去「会议 → 手动 → AI 设置」添加后，抽取会准确很多；现在只能用规则解析，规则只认「谁 + 做什么 + 几小时」。"
             : "",
           "建议在纪要里把「谁负责什么、要多久、什么时候前完成」写清楚，再试一次。",
           ...extraction.warnings,

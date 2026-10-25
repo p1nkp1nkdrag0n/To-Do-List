@@ -838,7 +838,24 @@ export function MeetingView({
                 <div className="inline-error">
                   <AlertCircle size={16} />
                   <div className="inline-error-text">{error}</div>
-                  <button className="secondary-button" type="button" onClick={audioUnsupported}>
+                  {error.includes("Key") || error.includes("大模型") ? (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => void openLlmSettings()}
+                    >
+                      <Settings2 size={14} /> 去配 Key
+                    </button>
+                  ) : null}
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => {
+                      // 重试要重跑「刚才那条路」：纪要就重跑纪要，不要跑去点录音。
+                      if (minutesText.trim() !== "") void startFromMinutes();
+                      else startFromMinutesPrompt();
+                    }}
+                  >
                     <RotateCcw size={14} /> 重试
                   </button>
                 </div>
