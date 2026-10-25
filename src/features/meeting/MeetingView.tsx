@@ -495,7 +495,7 @@ export function MeetingView({
     after: { conflicts: number; shortfallMinutes: number; slippageDays: number; operations: number };
   }>;
 
-  const conflictsBefore = run?.conflictsBefore ?? 2;
+  const conflictsBefore = run?.conflictsBefore ?? 0;
   const conflictsAfter = run?.conflictsAfter ?? 0;
   const progress = Math.min(100, Math.round((revealed / DEMO_TRANSCRIPT.length) * 100));
 

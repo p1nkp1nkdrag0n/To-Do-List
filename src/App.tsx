@@ -28,7 +28,8 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectDetail>();
-  const [activeView, setActiveView] = useState<WorkspaceView>("gantt");
+  // 默认落在「会议」：先由会议纪要生成排期，再去看甘特图。
+  const [activeView, setActiveView] = useState<WorkspaceView>("meeting");
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
