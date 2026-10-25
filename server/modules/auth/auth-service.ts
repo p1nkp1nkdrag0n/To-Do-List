@@ -13,6 +13,13 @@ import { registrationInviteDigest } from "../registration-invites/registration-i
 const SESSION_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const AUTH_ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+/**
+ * 同一个 IP 的阈值放宽：学校 / 公司常用 NAT，几十个人共用一个出口 IP，
+ * 按 5 次就把整个班锁了。账号维度仍然严格。
+ */
+const MAX_FAILED_ATTEMPTS_PER_IP = 40;
+/** 同一个 IP 在窗口内试过多少个不同账号；用于防「换着用户名撞库」。 */
+const MAX_FAILED_USERNAMES_PER_IP = 5;
 const DUMMY_PASSWORD_HASH =
   "$2a$10$sVbWZn7SSXtOrTuqSFd5nO7ME8YKLv.NihvcSfbPyZbF0JZlsivX.";
 
@@ -523,9 +530,16 @@ export class AuthService {
             WHERE ip_address = ? AND attempted_at > ?`,
           [ipAddress, cutoff],
         )?.count ?? 0;
+      const distinctUsernames =
+        this.dependencies.database.get<{ count: number }>(
+          `SELECT COUNT(DISTINCT normalized_username) AS count FROM auth_attempts
+            WHERE ip_address = ? AND attempted_at > ?`,
+          [ipAddress, cutoff],
+        )?.count ?? 0;
       if (
         usernameCount >= MAX_FAILED_LOGIN_ATTEMPTS ||
-        ipCount >= MAX_FAILED_LOGIN_ATTEMPTS
+        ipCount >= MAX_FAILED_ATTEMPTS_PER_IP ||
+        distinctUsernames >= MAX_FAILED_USERNAMES_PER_IP
       ) {
         return undefined;
       }

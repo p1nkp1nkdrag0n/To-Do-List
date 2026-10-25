@@ -30,13 +30,19 @@ export async function parseMinutesFile(
   if ([".txt", ".md", ".markdown", ".csv"].includes(extension)) {
     text = buffer.toString("utf8").replace(/^\uFEFF/, "");
   } else if (extension === ".docx") {
-    const result = await mammoth.extractRawText({ buffer });
-    text = result.value;
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value;
+    } catch {
+      throw new Error("这个 .docx 打不开（可能已损坏，或是把别的文件改了扩展名）。");
+    }
   } else if (extension === ".pdf") {
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
     try {
       const result = await parser.getText();
       text = result.text;
+    } catch {
+      throw new Error("这个 PDF 读不了（可能已损坏、加密，或是扫描件）。");
     } finally {
       await parser.destroy().catch(() => undefined);
     }
@@ -57,6 +63,10 @@ export async function parseMinutesFile(
 
   if (normalized.length < 10) {
     throw new Error("文件里没读到有效文字（可能是扫描件或加密 PDF）。");
+  }
+  // 超长文本既拖慢模型，也可能是解压炸弹：直接拒绝，提示拆分。
+  if (normalized.length > 200_000) {
+    throw new Error("文件内容超过 20 万字，请拆分后再上传。");
   }
 
   return { filename, extension, chars: normalized.length, text: normalized };

@@ -91,6 +91,15 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   const availability = new AvailabilityService(dependencies);
   /** 每个项目最近一次自动应用的方案，撤销时反推用。 */
   const lastApplied = loadLastApplied();
+
+  /** 所有按项目操作的接口都必须先确认调用者是项目成员。 */
+  const assertMember = (auth: AuthLocals["auth"], projectId: string): void => {
+    try {
+      availability.projectSummary(auth, projectId);
+    } catch {
+      throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+    }
+  };
   /** 正在运行的会议处理，按项目存一份暂停开关。 */
   const controls = new Map<string, MeetingControl>();
 
@@ -110,6 +119,9 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
       }
 
+      if (controls.has(projectId)) {
+        throw new HttpError(409, "MEETING_BUSY", "这个项目已经有一轮在处理了，等它跑完再试。");
+      }
       const control = new MeetingControl();
       controls.set(projectId, control);
       const orchestrator = new MeetingOrchestrator({
@@ -196,7 +208,8 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
    */
   router.post(
     "/minutes",
-    express.raw({ type: "*/*", limit: "20mb" }),
+    // 纪要文件一般不到 1MB；给到 10MB 足够，也避免解压/解析把内存打满。
+    express.raw({ type: "*/*", limit: "10mb" }),
     asyncRoute(async (request, response) => {
       const rawName = String(request.headers["x-filename"] ?? "minutes.txt");
       let filename = rawName;
@@ -209,7 +222,16 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       if (!Buffer.isBuffer(body) || body.length === 0) {
         throw new HttpError(400, "EMPTY_FILE", "没有收到文件内容。");
       }
-      const parsed = await parseMinutesFile(filename, body);
+      let parsed;
+      try {
+        parsed = await parseMinutesFile(filename, body);
+      } catch (error) {
+        throw new HttpError(
+          400,
+          "MINUTES_PARSE_FAILED",
+          error instanceof Error ? error.message : "文件解析失败。",
+        );
+      }
       response.json({ filename: parsed.filename, chars: parsed.chars, text: parsed.text });
     }),
   );
@@ -389,6 +411,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         z.object({ projectId: z.string().min(1), action: z.enum(["pause", "resume"]) }).strict(),
         request,
       );
+      assertMember(response.locals.auth, projectId);
       const control = controls.get(projectId);
       if (control === undefined) {
         throw new HttpError(409, "NO_RUNNING_MEETING", "当前没有正在处理的会议。");
@@ -413,6 +436,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       if (projectId === "") {
         throw new HttpError(400, "PROJECT_REQUIRED", "projectId 不能为空。");
       }
+      assertMember(response.locals.auth, projectId);
       const plan = lastApplied.get(projectId);
       response.json({
         projectId,
@@ -428,6 +452,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     "/undo",
     (request, response: Response<unknown, AuthLocals>) => {
       const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+      assertMember(response.locals.auth, projectId);
       const plan = lastApplied.get(projectId);
       if (plan === undefined) {
         throw new HttpError(
@@ -454,6 +479,14 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         availability.projectSummary(response.locals.auth, projectId);
       } catch {
         throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+      }
+
+      if (mode === "seed" && process.env.NODE_ENV === "production") {
+        throw new HttpError(
+          409,
+          "SEED_DISABLED",
+          "生产环境不允许重建演示数据（会写入固定密码的演示账号）。",
+        );
       }
 
       // 「清空任务」：只清本项目排期，成员和可用时间保留，用于接会议纪要。

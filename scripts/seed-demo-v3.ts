@@ -139,6 +139,9 @@ function printHeader(title: string): void {
 }
 
 async function main(): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("生产环境禁止运行演示种子脚本（会创建固定密码的演示账号）。");
+  }
   const flags = parseFlags(process.argv.slice(2));
   const config = parseConfig();
   const now = new Date();
