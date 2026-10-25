@@ -93,12 +93,15 @@ export function MeetingView({
   const [minutesFileName, setMinutesFileName] = useState("");
   const [uploadingMinutes, setUploadingMinutes] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 顶部提示：录音接口暂时空着，点了给一句人话。 */
+  const [notice, setNotice] = useState("");
   const [llmConfig, setLlmConfig] = useState<LlmConfigView>();
   const [llmForm, setLlmForm] = useState({ provider: "deepseek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", apiKey: "" });
   const [llmBusy, setLlmBusy] = useState("");
   const [llmMessage, setLlmMessage] = useState("");
   /** 这一轮输入的是录音还是纪要，决定左侧正文怎么画。 */
-  const [inputMode, setInputMode] = useState<"audio" | "minutes">("audio");
+  // 录音接口暂时空着，默认按纪要展示，避免页面一进来就写“上传录音/转写”。
+  const [inputMode, setInputMode] = useState<"audio" | "minutes">("minutes");
   /** 右栏两页：平时看日志，发现冲突时自动切到「冲突与方案」。 */
   const [rightTab, setRightTab] = useState<"log" | "conflict">("log");
   /** 手动暂停：录音回放和后台流水线都会停在原地。 */
@@ -338,6 +341,21 @@ export function MeetingView({
     }
   }, []);
 
+  useEffect(() => {
+    if (notice === "") return;
+    const timer = setTimeout(() => setNotice(""), 3000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const startFromMinutesPrompt = useCallback(() => {
+    setMinutesOpen(true);
+    setInputMode("minutes");
+  }, []);
+
+  const audioUnsupported = useCallback(() => {
+    setNotice("暂时不支持录音上传功能，请改用「粘贴会议纪要」。");
+  }, []);
+
   const openLlmSettings = useCallback(async () => {
     setSettingsOpen(true);
     setLlmMessage("");
@@ -526,7 +544,7 @@ export function MeetingView({
             className="primary-button"
             type="button"
             disabled={phase === "transcribing" || phase === "running"}
-            onClick={() => void startProcessing()}
+            onClick={audioUnsupported}
           >
             {phase === "transcribing" || phase === "running" ? (
               <LoaderCircle className="spin" size={16} />
@@ -568,22 +586,21 @@ export function MeetingView({
               type="button"
               className="secondary-button"
               disabled={manualBusy !== ""}
-              onClick={() => void startProcessing()}
+              onClick={() => {
+                if (minutesText.trim() !== "") void startFromMinutes();
+                else startFromMinutesPrompt();
+              }}
             >
               <RotateCcw size={14} /> 重新处理
             </button>
-            <label className="secondary-button meeting-file-button" title="选一个音频文件（转写仍为本地回放，等 ASR 接入后生效）">
+            <button
+              className="secondary-button"
+              type="button"
+              title="录音接口暂时空着"
+              onClick={audioUnsupported}
+            >
               <Mic size={14} /> 换一段录音
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file !== undefined) setRecordingName(file.name);
-                  event.target.value = "";
-                }}
-              />
-            </label>
+            </button>
             <button
               type="button"
               className="secondary-button"
@@ -777,6 +794,8 @@ export function MeetingView({
         </div>
       ) : null}
 
+      {notice !== "" ? <div className="meeting-notice">{notice}</div> : null}
+
       <div className="meeting-body">
         <section className="meeting-pane meeting-main">
           {phase === "idle" ? (
@@ -784,7 +803,10 @@ export function MeetingView({
               <div className="meeting-empty-icon"><Mic size={26} /></div>
               <h2>上传今天的会议录音，或粘贴会议纪要</h2>
               <p>点一次就好：转写（或直接读纪要）、抽任务、排期和冲突修复都会自动完成。</p>
-              <button className="primary-button" type="button" onClick={() => void startProcessing()}>
+              <button className="primary-button" type="button" onClick={() => void startFromMinutesPrompt()}>
+                <FileText size={16} /> 粘贴会议纪要
+              </button>
+              <button className="secondary-button" type="button" onClick={audioUnsupported}>
                 <Upload size={16} /> 上传会议录音
               </button>
               {!online ? <p className="meeting-hint">当前离线：上传后只做本地演示。</p> : null}
@@ -894,7 +916,7 @@ export function MeetingView({
                 <div className="inline-error">
                   <AlertCircle size={16} />
                   <div className="inline-error-text">{error}</div>
-                  <button className="secondary-button" type="button" onClick={() => void startProcessing()}>
+                  <button className="secondary-button" type="button" onClick={audioUnsupported}>
                     <RotateCcw size={14} /> 重试
                   </button>
                 </div>
@@ -1039,7 +1061,7 @@ export function MeetingView({
           ) : (
           <div className="meeting-log-body">
             {events.length === 0 ? (
-              <p className="meeting-log-empty">还没有日志。点「上传会议录音」后，这里会实时滚动。</p>
+              <p className="meeting-log-empty">还没有日志。点「粘贴会议纪要」后，这里会实时滚动。</p>
             ) : (
               events.map((event, index) => (
                 <div className={`meeting-entry ${event.type}`} key={`${event.at}-${index}`}>

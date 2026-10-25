@@ -834,3 +834,18 @@
   color: var(--ink);
   background: var(--surface-soft);
 }
+
+.meeting-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(28, 32, 38, 0.92);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
+  pointer-events: none;
+}
