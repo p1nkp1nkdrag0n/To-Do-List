@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { Check, Plus, X } from "lucide-react";
+import { Check, Plus, RefreshCw, X } from "lucide-react";
 
 import { api, errorMessage } from "../../lib/api";
 import { LLM_PRESETS, presetByBaseUrl, type LlmPreset } from "./llm-presets";
@@ -34,6 +34,8 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  /** 每个供应商可选的模型（预设 + 从平台拉到的）。 */
+  const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
 
   const load = useCallback(async () => {
     try {
@@ -53,6 +55,44 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       void load();
     }
   }, [open, load]);
+
+  const optionsFor = (provider: ProviderView): string[] => {
+    const preset = presetByBaseUrl(provider.baseUrl);
+    const base = preset?.models ?? [];
+    const merged = [...new Set([provider.model, ...(modelOptions[provider.id] ?? []), ...base])];
+    return merged;
+  };
+
+  const changeModel = async (provider: ProviderView, model: string) => {
+    if (model === provider.model) return;
+    setBusy("切换模型…");
+    setMessage("");
+    try {
+      await api.put(`/api/meeting/llm/providers/${provider.id}`, { model });
+      await load();
+      setMessage(`已切到 ${model}`);
+    } catch (caught) {
+      setMessage(errorMessage(caught));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const syncModels = async (provider: ProviderView) => {
+    setBusy("拉取模型…");
+    setMessage("");
+    try {
+      const result = await api.post<{ models: string[] }>(
+        `/api/meeting/llm/providers/${provider.id}/models`,
+      );
+      setModelOptions((current) => ({ ...current, [provider.id]: result.models }));
+      setMessage(`拉到 ${result.models.length} 个可用模型`);
+    } catch (caught) {
+      setMessage(errorMessage(caught));
+    } finally {
+      setBusy("");
+    }
+  };
 
   const activate = async (id: string) => {
     setBusy("切换中…");
@@ -167,6 +207,30 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                     </span>
                     {provider.active ? <Check className="llm-row-check" size={16} /> : null}
                   </button>
+
+                  <div className="llm-row-tools">
+                    <select
+                      value={provider.model}
+                      disabled={busy !== ""}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => void changeModel(provider, event.target.value)}
+                    >
+                      {optionsFor(provider).map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="用 Key 拉取这个平台可用的模型"
+                      disabled={busy !== "" || !provider.hasKey}
+                      onClick={() => void syncModels(provider)}
+                    >
+                      <RefreshCw size={13} />
+                    </button>
+                  </div>
 
                   {needKeyFor === provider.id ? (
                     <div className="llm-row-key">

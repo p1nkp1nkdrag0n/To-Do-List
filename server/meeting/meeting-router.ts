@@ -305,6 +305,38 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     }),
   );
 
+  /** 用已保存的 Key 拉这个供应商的模型列表（换模型时用）。 */
+  router.post(
+    "/llm/providers/:id/models",
+    asyncRoute(async (request, response) => {
+      const provider = readConfig().providers.find(
+        (item) => item.id === String(request.params.id),
+      );
+      if (provider === undefined) {
+        throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+      }
+      try {
+        const upstream = await fetch(`${provider.baseUrl.replace(/\/$/, "")}/models`, {
+          headers: { authorization: `Bearer ${provider.apiKey}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!upstream.ok) throw new Error(`上游返回 ${upstream.status}`);
+        const payload = (await upstream.json()) as { data?: Array<{ id?: string }> };
+        const models = (payload.data ?? [])
+          .map((item) => item.id)
+          .filter((id): id is string => typeof id === "string" && id !== "")
+          .sort();
+        response.json({ models });
+      } catch (error) {
+        throw new HttpError(
+          400,
+          "MODELS_FAILED",
+          `拉取模型列表失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }),
+  );
+
   /** 用某个供应商发一次最小请求，验证 key 是否可用。 */
   router.post("/llm/providers/:id/test", asyncRoute(async (request, response) => {
     const provider = readConfig().providers.find(

@@ -1277,3 +1277,21 @@
   color: var(--red);
   background: var(--red-soft);
 }
+
+.llm-row-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+
+.llm-row-tools select {
+  flex: 1;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
