@@ -307,6 +307,12 @@ export function GanttView({ project, currentUserId, online, collaboration }: Gan
         <div className="gantt-table" ref={timelineMeasureRef} data-tour-id="gantt-table">
           <div className="gantt-left-pane">
             <div className="gantt-meta-header"><span>阶段 / 任务 / 分工</span><span>负责人</span><span>状态</span><span>进度</span></div>
+            {rows.length === 0 ? (
+              <div className="gantt-empty">
+                <strong>排期还是空的</strong>
+                <p>去「会议」上传或粘贴会议纪要，任务会自动长到这里。</p>
+              </div>
+            ) : null}
             {rows.map((row) => (
               <button
                 type="button"

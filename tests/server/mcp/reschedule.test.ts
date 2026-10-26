@@ -369,3 +369,54 @@ describe("planReschedules · 规模与性能", () => {
     }
   });
 });
+
+describe("planReschedules · 负责人锁定（allowReassign=false）", () => {
+  /** 张工超载、李工有空：允许换人时会出现 reassign/split，锁定时只能延期。 */
+  function overloadedSnapshot(): ScheduleSnapshot {
+    const slotDay = dayOfWeek(TODAY);
+    return {
+      tasks: [makeTask("t9", TODAY, addDays(TODAY, 1))],
+      participants: [
+        makeParticipant({
+          id: "p9",
+          taskId: "t9",
+          userId: "u1",
+          startDate: TODAY,
+          endDate: addDays(TODAY, 1),
+          estimatedMinutes: 600,
+        }),
+      ],
+      dependencies: [],
+      profiles: [
+        makeProfile("u1", {
+          weeklyCapacityMinutes: 120,
+          slots: [{ dayOfWeek: slotDay, startMinute: 1_140, endMinute: 1_260 }],
+        }),
+        makeProfile("u2", { weeklyCapacityMinutes: 1_680, slots: everyDay(1_140, 1_380) }),
+      ],
+    };
+  }
+
+  const context = () =>
+    makeContext(
+      [
+        ["u1", "张工"],
+        ["u2", "李工"],
+      ],
+      [["t9", "接口联调"]],
+    );
+
+  it("允许换人时，方案里会出现换人或拆分", () => {
+    const plans = planReschedules(overloadedSnapshot(), context(), { allowReassign: true });
+    const kinds = plans.flatMap((plan) => plan.operations.map((operation) => operation.kind));
+    expect(kinds.some((kind) => kind === "reassign" || kind === "split")).toBe(true);
+  });
+
+  it("锁定负责人时，绝不出现换人或拆分", () => {
+    const plans = planReschedules(overloadedSnapshot(), context(), { allowReassign: false });
+    const kinds = plans.flatMap((plan) => plan.operations.map((operation) => operation.kind));
+    expect(kinds).not.toContain("reassign");
+    expect(kinds).not.toContain("split");
+    expect(kinds.some((kind) => kind === "extend" || kind === "shiftTask")).toBe(true);
+  });
+});

@@ -95,6 +95,11 @@ export interface PlanOptions {
   maxSteps?: number;
   maxPlans?: number;
   beamWidth?: number;
+  /**
+   * 是否允许把活转给别人（换人 / 拆分）。
+   * 有些项目里「谁负责」是定死的，只能延期或平移，这时传 false。
+   */
+  allowReassign?: boolean;
 }
 
 function dateAt(milliseconds: number): string {
@@ -295,6 +300,7 @@ function candidatesFor(
   snapshot: ScheduleSnapshot,
   conflict: ScheduleConflict,
   context: PlanContext,
+  options: { allowReassign: boolean } = { allowReassign: true },
 ): PlanOperation[] {
   const operations: PlanOperation[] = [];
 
@@ -312,7 +318,11 @@ function candidatesFor(
     );
     const allTargets = memberOptions(snapshot, conflict, context);
     const healthyTargets = allTargets.filter((userId) => !overloaded.has(userId));
-    const targets = healthyTargets.length > 0 ? healthyTargets : allTargets;
+    const targets = options.allowReassign
+      ? healthyTargets.length > 0
+        ? healthyTargets
+        : allTargets
+      : [];
 
     for (const userId of targets) {
       if (conflict.unallocatedMinutes >= participant.estimatedMinutes) {
@@ -466,6 +476,7 @@ function search(
   baselineDue: Map<string, string | null>,
   maxSteps: number,
   beamWidth: number,
+  allowReassign: boolean,
 ): { best: SearchNode | null; solutions: SearchNode[] } {
   let frontier: SearchNode[] = [
     {
@@ -484,7 +495,7 @@ function search(
       const conflicts = conflictList(node.snapshot, context.today);
       if (conflicts.length === 0) continue;
       for (const conflict of conflicts.slice(0, 2)) {
-        for (const operation of candidatesFor(node.snapshot, conflict, context)) {
+        for (const operation of candidatesFor(node.snapshot, conflict, context, { allowReassign })) {
           const nextSnapshot = applyOperation(node.snapshot, operation);
           const stateKey = snapshotSignature(nextSnapshot);
           if (seenStates.has(stateKey)) continue;
@@ -516,6 +527,7 @@ function greedyRepair(
   context: PlanContext,
   baselineDue: Map<string, string | null>,
   maxSteps: number,
+  allowReassign: boolean,
 ): SearchNode {
   let snapshot = cloneSnapshot(initial);
   const operations: PlanOperation[] = [];
@@ -528,7 +540,7 @@ function greedyRepair(
     let best: { snapshot: ScheduleSnapshot; operation: PlanOperation; score: PlanScore } | null =
       null;
     for (const conflict of conflicts.slice(0, 3)) {
-      for (const operation of candidatesFor(snapshot, conflict, context)) {
+      for (const operation of candidatesFor(snapshot, conflict, context, { allowReassign })) {
         const next = applyOperation(snapshot, operation);
         const nextScore = scoreOf(next, context, baselineDue, operations.length + 1);
         if (rank(nextScore) >= rank(score)) continue;
@@ -553,6 +565,7 @@ export function planReschedules(
 ): ReschedulePlan[] {
   const maxPlans = options.maxPlans ?? 3;
   const beamWidth = options.beamWidth ?? 24;
+  const allowReassign = options.allowReassign ?? true;
   const baselineDue = baselineDueDates(snapshot);
   const before = scoreOf(snapshot, context, baselineDue, 0);
   const conflictCount = before.conflicts;
@@ -563,6 +576,7 @@ export function planReschedules(
     context,
     baselineDue,
     options.maxSteps ?? Math.min(Math.max(conflictCount + 2, 4), 24),
+    allowReassign,
   );
 
   const pools: SearchNode[] = [greedyResult];
@@ -575,6 +589,7 @@ export function planReschedules(
       baselineDue,
       options.maxSteps ?? 4,
       beamWidth,
+      allowReassign,
     );
     for (const node of escaped.solutions) {
       pools.push({

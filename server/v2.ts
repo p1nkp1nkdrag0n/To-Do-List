@@ -4,8 +4,10 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { parseConfig, type AppConfig } from "./config/env.js";
+import { loadEnvFile } from "./config/dotenv.js";
 import { openV2Database, type V2Database } from "./db/database.js";
 import { migrateV2Database } from "./db/migrations.js";
+import { migrateLegacyConfigToOwner } from "./meeting/llm-config.js";
 import { createV2App } from "./http/app.js";
 import { defaultV2Logger, resolveDependencies } from "./http/dependencies.js";
 import type { V2Logger } from "./http/errors.js";
@@ -42,6 +44,21 @@ export interface V2ServerOptions {
   staticPath?: string | null;
 }
 
+/**
+ * 老版本把大模型配置存在一个全局文件里；现在改成按用户存。
+ * 启动时把那份配置交给部署者（默认 qyhsktn），其它用户看不到。
+ */
+function migrateLlmConfigAtStartup(database: V2Database): void {
+  const ownerName = process.env.LLM_OWNER_USERNAME ?? "qyhsktn";
+  const owner = database
+    .prepare("SELECT id FROM users WHERE username = ? COLLATE NOCASE")
+    .get(ownerName) as { id?: string } | undefined;
+  if (owner?.id === undefined) return;
+  if (migrateLegacyConfigToOwner(owner.id)) {
+    console.log(`[llm] 已把旧配置迁移给 ${ownerName}`);
+  }
+}
+
 export async function startV2Server(
   config: AppConfig = parseConfig(),
   options: V2ServerOptions = {},
@@ -62,6 +79,7 @@ export async function startV2Server(
     });
     database = openV2Database(config.dbPath);
     migrateV2Database(database);
+    migrateLlmConfigAtStartup(database);
     purgeStaleAttempts(database, clock());
     await blobStore.initialize();
     blobStore.assertSufficientSpace();
@@ -221,6 +239,11 @@ const entrypointUrl = process.argv[1]
   : undefined;
 
 if (entrypointUrl === import.meta.url) {
+  // 兜底：任何漏掉的异步异常都不应该让 API 直接退出（页面会变成 502）。
+  process.on("unhandledRejection", (reason) => {
+    console.error("[unhandledRejection]", reason);
+  });
+  loadEnvFile();
   void startV2Server()
     .then((handle) => {
       console.log(`v2 API listening at ${handle.url}`);

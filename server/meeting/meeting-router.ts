@@ -19,12 +19,45 @@ import { AvailabilityService } from "../modules/availability/availability-servic
 import type { AuthLocals } from "../modules/auth/auth-router.js";
 import { MeetingOrchestrator } from "./orchestrator.js";
 
+import express from "express";
+
+import { asyncRoute } from "../http/routing.js";
+
+import { MeetingControl } from "./control.js";
+import { chatJson } from "./llm.js";
+import {
+  activateProvider,
+  configView,
+  createProvider,
+  deleteProvider,
+  readConfig,
+  updateProvider,
+} from "./llm-config.js";
+import { parseMinutesFile } from "./minutes-file.js";
+import { clearProjectSchedule } from "./demo-reset.js";
 import { undoPlan } from "./undo.js";
 import type { AppliedPlanRecord } from "./events.js";
 
 const RunMeetingRequestSchema = z
   .object({
     projectId: z.string().min(1),
+  })
+  .strict();
+
+/** 纪要路径：带 minutes 就从纪要抽任务，不带就是老的「只修复」路径。 */
+const RunWithMinutesSchema = z
+  .object({
+    projectId: z.string().min(1),
+    minutes: z.string().max(20_000).optional(),
+    lockOwners: z.boolean().optional(),
+    replaceSchedule: z.boolean().optional(),
+  })
+  .strict();
+
+const ResetRequestSchema = z
+  .object({
+    projectId: z.string().min(1),
+    mode: z.enum(["seed", "empty"]).default("seed"),
   })
   .strict();
 
@@ -59,10 +92,24 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   /** 每个项目最近一次自动应用的方案，撤销时反推用。 */
   const lastApplied = loadLastApplied();
 
+  /** 所有按项目操作的接口都必须先确认调用者是项目成员。 */
+  const assertMember = (auth: AuthLocals["auth"], projectId: string): void => {
+    try {
+      availability.projectSummary(auth, projectId);
+    } catch {
+      throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+    }
+  };
+  /** 正在运行的会议处理，按项目存一份暂停开关。 */
+  const controls = new Map<string, MeetingControl>();
+
   router.post(
     "/run",
-    async (request, response: Response<unknown, AuthLocals>) => {
-      const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+    asyncRoute(async (request, response) => {
+      const { projectId, minutes, lockOwners, replaceSchedule } = parseRequestBody(
+        RunWithMinutesSchema,
+        request,
+      );
       const auth = response.locals.auth;
 
       // 只有项目成员能触发；编排器本身用 MCP 的固定身份跑，但入口必须先过权限。
@@ -72,8 +119,18 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
       }
 
+      if (controls.has(projectId)) {
+        throw new HttpError(409, "MEETING_BUSY", "这个项目已经有一轮在处理了，等它跑完再试。");
+      }
+      const control = new MeetingControl();
+      controls.set(projectId, control);
       const orchestrator = new MeetingOrchestrator({
         projectId,
+        control,
+        // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
+        paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),
+        lockOwners: lockOwners ?? false,
+        actingUserId: auth.user.id,
         onEvent(event) {
           dependencies.publishMeetingEvent?.(projectId, {
             type: event.type,
@@ -97,7 +154,37 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         },
       });
 
-      const result = await orchestrator.run();
+      const trimmed = minutes?.trim() ?? "";
+      let clearedTasks = 0;
+      if (trimmed !== "" && replaceSchedule === true) {
+        // 从纪要建排期＝重建，不是往旧排期上叠加。
+        clearedTasks = clearProjectSchedule(dependencies, projectId).removedTasks;
+        dependencies.publishMeetingEvent?.(projectId, {
+          type: "session.started",
+          at: new Date().toISOString(),
+          message:
+            clearedTasks > 0
+              ? `已清空原有排期（${clearedTasks} 个任务），按纪要重建`
+              : "当前排期为空，按纪要新建",
+        });
+      }
+      let result;
+      try {
+        result =
+          trimmed === ""
+            ? await orchestrator.run()
+            : await orchestrator.runFromMinutes(trimmed);
+      } catch (error) {
+        // 编排器抛的是普通 Error，这里转成 400，页面才能显示真实原因。
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(
+          400,
+          "MEETING_RUN_FAILED",
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        controls.delete(projectId);
+      }
       if (result.appliedPlan !== null) {
         lastApplied.set(projectId, result.appliedPlan);
         saveLastApplied(lastApplied);
@@ -107,10 +194,237 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         conflictsBefore: result.conflictsBefore,
         conflictsAfter: result.conflictsAfter,
         appliedPlanId: result.appliedPlanId,
+        clearedTasks,
         undoAvailable: lastApplied.has(projectId),
         durationMs: result.durationMs,
         events: result.events,
       });
+    }),
+  );
+
+  /**
+   * 上传纪要文件（txt / docx / pdf），返回抽好的纯文本。
+   * 用一个原始 body + 文件名 header，避免引入 multipart 依赖。
+   */
+  router.post(
+    "/minutes",
+    // 纪要文件一般不到 1MB；给到 10MB 足够，也避免解压/解析把内存打满。
+    express.raw({ type: "*/*", limit: "10mb" }),
+    asyncRoute(async (request, response) => {
+      const rawName = String(request.headers["x-filename"] ?? "minutes.txt");
+      let filename = rawName;
+      try {
+        filename = decodeURIComponent(rawName);
+      } catch {
+        // 文件名没编码过，按原样用。
+      }
+      const body = request.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        throw new HttpError(400, "EMPTY_FILE", "没有收到文件内容。");
+      }
+      let parsed;
+      try {
+        parsed = await parseMinutesFile(filename, body);
+      } catch (error) {
+        throw new HttpError(
+          400,
+          "MINUTES_PARSE_FAILED",
+          error instanceof Error ? error.message : "文件解析失败。",
+        );
+      }
+      response.json({ filename: parsed.filename, chars: parsed.chars, text: parsed.text });
+    }),
+  );
+
+  /** 读全部供应商（key 只回显末四位，外加“当前是哪个”）。 */
+  router.get("/llm-config", (_request, response) => {
+    response.json(configView(response.locals.auth.user.id));
+  });
+
+  /** 新增一个供应商；第一个自动设为当前。 */
+  router.post("/llm/providers", (request, response) => {
+    const input = parseRequestBody(
+      z
+        .object({
+          name: z.string().min(1).max(40),
+          baseUrl: z.string().url(),
+          model: z.string().min(1).max(80),
+          apiKey: z.string().max(200),
+        })
+        .strict(),
+      request,
+    );
+    const created = createProvider(response.locals.auth.user.id, input);
+    response.status(201).json({ id: created.id, ...configView(response.locals.auth.user.id) });
+  });
+
+  /** 改一个供应商；apiKey 留空表示不改。 */
+  router.put("/llm/providers/:id", (request, response) => {
+    const input = parseRequestBody(
+      z
+        .object({
+          name: z.string().min(1).max(40).optional(),
+          baseUrl: z.string().url().optional(),
+          model: z.string().min(1).max(80).optional(),
+          apiKey: z.string().max(200).optional(),
+        })
+        .strict(),
+      request,
+    );
+    const updated = updateProvider(
+      response.locals.auth.user.id,
+      String(request.params.id),
+      input,
+    );
+    if (updated === undefined) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+    }
+    response.json(configView(response.locals.auth.user.id));
+  });
+
+  router.delete("/llm/providers/:id", (request, response) => {
+    if (!deleteProvider(response.locals.auth.user.id, String(request.params.id))) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+    }
+    response.json(configView(response.locals.auth.user.id));
+  });
+
+  /** 切换当前供应商 —— cc-switch 的核心动作。 */
+  router.post("/llm/providers/:id/activate", (request, response) => {
+    if (!activateProvider(response.locals.auth.user.id, String(request.params.id))) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+    }
+    response.json(configView(response.locals.auth.user.id));
+  });
+
+  /** 拉取这个地址下 Key 可用的模型列表（各大平台都是 OpenAI 兼容的 /models）。 */
+  router.post(
+    "/llm/models",
+    asyncRoute(async (request, response) => {
+      const { baseUrl, apiKey } = parseRequestBody(
+        z.object({ baseUrl: z.string().url(), apiKey: z.string().min(1).max(200) }).strict(),
+        request,
+      );
+      if (apiKey.includes("://")) {
+        throw new HttpError(400, "INVALID_KEY", "这看起来是接口地址，不是 API Key。");
+      }
+      try {
+        const upstream = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+          headers: { authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!upstream.ok) {
+          throw new Error(`上游返回 ${upstream.status}`);
+        }
+        const payload = (await upstream.json()) as {
+          data?: Array<{ id?: string; name?: string }>;
+        };
+        const models = (payload.data ?? [])
+          .filter((item) => typeof item.id === "string" && item.id !== "")
+          .map((item) => ({ id: item.id as string, name: item.name ?? (item.id as string) }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+        response.json({ models });
+      } catch (error) {
+        throw new HttpError(
+          400,
+          "MODELS_FAILED",
+          `拉取模型列表失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }),
+  );
+
+  /** 用已保存的 Key 拉这个供应商的模型列表（换模型时用）。 */
+  router.post(
+    "/llm/providers/:id/models",
+    asyncRoute(async (request, response) => {
+      const provider = readConfig(response.locals.auth.user.id).providers.find(
+        (item) => item.id === String(request.params.id),
+      );
+      if (provider === undefined) {
+        throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+      }
+      try {
+        const upstream = await fetch(`${provider.baseUrl.replace(/\/$/, "")}/models`, {
+          headers: { authorization: `Bearer ${provider.apiKey}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!upstream.ok) throw new Error(`上游返回 ${upstream.status}`);
+        const payload = (await upstream.json()) as {
+          data?: Array<{ id?: string; name?: string }>;
+        };
+        const models = (payload.data ?? [])
+          .filter((item) => typeof item.id === "string" && item.id !== "")
+          .map((item) => ({ id: item.id as string, name: item.name ?? (item.id as string) }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+        response.json({ models });
+      } catch (error) {
+        throw new HttpError(
+          400,
+          "MODELS_FAILED",
+          `拉取模型列表失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }),
+  );
+
+  /** 用某个供应商发一次最小请求，验证 key 是否可用。 */
+  router.post("/llm/providers/:id/test", asyncRoute(async (request, response) => {
+    const provider = readConfig(response.locals.auth.user.id).providers.find(
+      (item) => item.id === String(request.params.id),
+    );
+    if (provider === undefined) {
+      throw new HttpError(404, "PROVIDER_NOT_FOUND", "找不到这个供应商。");
+    }
+    if (provider.apiKey === "") {
+      throw new HttpError(400, "API_KEY_REQUIRED", "这个供应商还没有填 API Key。");
+    }
+    try {
+      const started = Date.now();
+      await chatJson({
+        config: {
+          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl,
+          model: provider.model,
+          provider: provider.name.toLowerCase(),
+        },
+        system: "你是一个连通性测试助手，只输出 JSON。",
+        user: '返回 {"ok": true}',
+        schema: z.object({ ok: z.boolean() }),
+        timeoutMs: 15_000,
+      });
+      response.json({ ok: true, latencyMs: Date.now() - started, model: provider.model });
+    } catch (error) {
+      throw new HttpError(
+        400,
+        "LLM_TEST_FAILED",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }));
+
+  /** 暂停 / 继续：只在会议处理跑到一半时有意义。 */
+  router.post(
+    "/control",
+    (request, response: Response<unknown, AuthLocals>) => {
+      const { projectId, action } = parseRequestBody(
+        z.object({ projectId: z.string().min(1), action: z.enum(["pause", "resume"]) }).strict(),
+        request,
+      );
+      assertMember(response.locals.auth, projectId);
+      const control = controls.get(projectId);
+      if (control === undefined) {
+        throw new HttpError(409, "NO_RUNNING_MEETING", "当前没有正在处理的会议。");
+      }
+      if (action === "pause") control.pause();
+      else control.resume();
+      dependencies.publishMeetingEvent?.(projectId, {
+        type: "session.started",
+        at: new Date().toISOString(),
+        message: action === "pause" ? "已请求暂停，将在下一个检查点停下" : "已恢复",
+        detail: { paused: action === "pause" },
+      });
+      response.json({ projectId, paused: control.isPaused });
     },
   );
 
@@ -122,6 +436,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       if (projectId === "") {
         throw new HttpError(400, "PROJECT_REQUIRED", "projectId 不能为空。");
       }
+      assertMember(response.locals.auth, projectId);
       const plan = lastApplied.get(projectId);
       response.json({
         projectId,
@@ -137,6 +452,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     "/undo",
     (request, response: Response<unknown, AuthLocals>) => {
       const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+      assertMember(response.locals.auth, projectId);
       const plan = lastApplied.get(projectId);
       if (plan === undefined) {
         throw new HttpError(
@@ -157,12 +473,36 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   /** 还原演示数据（现场保险）：本质上是跑一遍 seed 脚本 --reset。 */
   router.post(
     "/reset",
-    async (request, response: Response<unknown, AuthLocals>) => {
-      const { projectId } = parseRequestBody(RunMeetingRequestSchema, request);
+    asyncRoute(async (request, response) => {
+      const { projectId, mode } = parseRequestBody(ResetRequestSchema, request);
       try {
         availability.projectSummary(response.locals.auth, projectId);
       } catch {
         throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+      }
+
+      if (mode === "seed" && process.env.NODE_ENV === "production") {
+        throw new HttpError(
+          409,
+          "SEED_DISABLED",
+          "生产环境不允许重建演示数据（会写入固定密码的演示账号）。",
+        );
+      }
+
+      // 「清空任务」：只清本项目排期，成员和可用时间保留，用于接会议纪要。
+      if (mode === "empty") {
+        const cleared = clearProjectSchedule(dependencies, projectId);
+        lastApplied.delete(projectId);
+        saveLastApplied(lastApplied);
+        dependencies.publishEntityInvalidation?.(projectId, "project", projectId);
+        dependencies.publishEntityInvalidation?.(projectId, "task", projectId);
+        response.json({
+          ok: true,
+          mode,
+          removedTasks: cleared.removedTasks,
+          tail: [`已清空 ${cleared.removedTasks} 个任务`],
+        });
+        return;
       }
 
       const child = spawn(
@@ -187,7 +527,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         exitCode: code,
         tail: output.trim().split("\n").slice(-6),
       });
-    },
+    }),
   );
 
   return router;

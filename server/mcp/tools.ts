@@ -272,13 +272,22 @@ export function registerTools(server: McpServer, runtime: McpRuntime): void {
       title: "试算重排方案（不写库）",
       description:
         "对当前排期做一次只读试算：先生成候选动作（换人 / 拆分 / 延期 / 整体平移并连带下游），用冲突引擎当裁判逐个模拟，返回最多 3 个方案，每个都带「冲突数、缺口、延期天数」和中文摘要。**不修改任何数据**，选定后把 planId 交给 apply_plan。",
-      inputSchema: { projectId: ProjectIdArgument },
+      inputSchema: {
+        projectId: ProjectIdArgument,
+        allowReassign: z
+          .boolean()
+          .optional()
+          .describe("是否允许换人/拆分；某些项目负责人是定死的，传 false 就只延期和排期"),
+      },
     },
-    async ({ projectId }) => {
+    async ({ projectId, allowReassign }) => {
       try {
         const resolved = runtime.resolveProjectId(projectId);
         const { snapshot, context } = loadSchedule(runtime, resolved);
-        const plans = planReschedules(snapshot, context, { maxPlans: 3 });
+        const plans = planReschedules(snapshot, context, {
+          maxPlans: 3,
+          allowReassign: allowReassign ?? true,
+        });
         runtime.planCache.set(resolved, plans);
 
         return jsonResult({

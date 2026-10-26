@@ -38,6 +38,14 @@ export function createV2App(
   const runtime = resolveDependencies(dependencies);
   const app = express();
   app.disable("x-powered-by");
+  // 基础安全头：够用且不影响 SPA / WebSocket。
+  app.use((_request, response, next) => {
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-Frame-Options", "DENY");
+    response.setHeader("Referrer-Policy", "same-origin");
+    response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    next();
+  });
   app.set("trust proxy", runtime.trustProxyHops);
   app.use(express.json({ limit: "1mb", strict: true }));
   app.get("/healthz", (_request, response) => {

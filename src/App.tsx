@@ -9,6 +9,7 @@ import { tourDefinition } from "./features/onboarding/tour-definitions";
 import type { TourSection } from "./features/onboarding/tour-types";
 import { useProductTour } from "./features/onboarding/useProductTour";
 import { CreateProjectDialog, InviteDialog, RedeemInviteScreen } from "./features/projects/ProjectDialogs";
+import { RegistrationInvitesDialog } from "./features/team/RegistrationInvitesDialog";
 import { ProjectSettingsDialog } from "./features/projects/ProjectSettingsDialog";
 import { api, ApiError, errorMessage } from "./lib/api";
 import { useAppearance } from "./lib/useAppearance";
@@ -28,9 +29,11 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectDetail>();
-  const [activeView, setActiveView] = useState<WorkspaceView>("gantt");
+  // 默认落在「会议」：先由会议纪要生成排期，再去看甘特图。
+  const [activeView, setActiveView] = useState<WorkspaceView>("meeting");
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [showRegistrationInvites, setShowRegistrationInvites] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [error, setError] = useState("");
@@ -178,6 +181,7 @@ export default function App() {
         onChangeView={setActiveView}
         onCreateProject={() => setShowCreateProject(true)}
         onInvite={() => setShowInvite(true)}
+        onRegistrationInvites={() => setShowRegistrationInvites(true)}
         onProjectSettings={() => setShowProjectSettings(true)}
         onLogout={() => void logout()}
       >
@@ -185,6 +189,7 @@ export default function App() {
           {activeView === "meeting" ? (
             <MeetingView
               project={activeProject}
+              currentUserId={auth.user.id}
               collaboration={collaboration}
               online={online}
               onJumpToGantt={() => setActiveView("gantt")}
@@ -214,6 +219,10 @@ export default function App() {
       </AppShell>
       {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
       {showInvite ? <InviteDialog projectId={activeProject.project.id} projectName={activeProject.project.name} onClose={() => setShowInvite(false)} /> : null}
+      <RegistrationInvitesDialog
+        open={showRegistrationInvites}
+        onClose={() => setShowRegistrationInvites(false)}
+      />
       {showProjectSettings ? <ProjectSettingsDialog project={activeProject} teamMembers={teamMembers} online={online} guideProgress={tour.progress} onClose={() => setShowProjectSettings(false)} onChanged={() => loadWorkspace(activeProject.project.id)} onReplayGuide={replayGuide} onResetGuides={tour.resetAll} /> : null}
       <ProductTour controller={tour} onCreateProject={openGuidedProjectDialog} />
     </>

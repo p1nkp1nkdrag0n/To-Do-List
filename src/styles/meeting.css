@@ -458,3 +458,901 @@
     grid-template-columns: minmax(0, 1fr) 320px;
   }
 }
+
+/* ---------- 粘贴纪要弹层 ---------- */
+.meeting-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(18 28 42 / 38%);
+  backdrop-filter: blur(2px);
+}
+
+.meeting-modal {
+  width: min(720px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.meeting-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meeting-modal-head strong {
+  flex: 1;
+  font-size: 15px;
+}
+
+.meeting-modal textarea {
+  min-height: 260px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.meeting-modal textarea:focus {
+  outline: 2px solid var(--blue-soft);
+  border-color: var(--blue);
+}
+
+.meeting-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meeting-modal-hint {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--blue);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.meeting-minutes-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--ink);
+}
+
+/* ---------- 右栏两个标签页 ---------- */
+.meeting-log-tabs {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.meeting-log-tabs button {
+  border: none;
+  background: transparent;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.meeting-log-tabs button span {
+  font-size: 10.5px;
+  color: var(--subtle);
+}
+
+.meeting-log-tabs button.on {
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.meeting-tab-badge {
+  background: var(--red-soft);
+  color: #a3141c !important;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+/* ---------- 冲突与方案 ---------- */
+.meeting-conflict-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.meeting-conflict-card {
+  border: 1px solid #f3c9cb;
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: linear-gradient(180deg, #fff8f8, var(--surface));
+}
+
+.cc-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cc-tag {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #a3141c;
+  background: var(--red-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.cc-tag.win {
+  background: var(--green-soft);
+  color: #0c6f3c;
+}
+
+.cc-tag.warn {
+  background: var(--orange-soft);
+  color: #8a5a00;
+}
+
+.meeting-conflict-card h4 {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cc-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.cc-numbers b {
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.cc-short {
+  color: #a3141c;
+  font-weight: 700;
+}
+
+.cc-bar {
+  margin-top: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: #f0b6ba;
+  overflow: hidden;
+}
+
+.cc-bar i.avail {
+  display: block;
+  height: 100%;
+  background: #c9d3e0;
+}
+
+.cc-legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--subtle);
+}
+
+.cc-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+
+.cc-legend i.avail {
+  background: #c9d3e0;
+}
+
+.cc-legend i.need {
+  background: var(--red);
+}
+
+.cc-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtle);
+  font-size: 11px;
+  margin: 4px 0;
+}
+
+.cc-divider::before,
+.cc-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+
+.meeting-plan-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: var(--surface);
+}
+
+.meeting-plan-card.on {
+  border-color: #9fd9b6;
+  background: linear-gradient(180deg, #f4fcf7, var(--surface));
+  box-shadow: 0 6px 18px rgb(24 174 97 / 10%);
+}
+
+.cc-name {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.cc-summary {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #374151;
+}
+
+.cc-metrics {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cc-metrics b {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.cc-metrics .good b {
+  color: #0c6f3c;
+}
+
+.cc-metrics .bad b {
+  color: #a3141c;
+}
+
+.cc-applied {
+  border-radius: 10px;
+  background: var(--green-soft);
+  color: #0c6f3c;
+  font-size: 11.5px;
+  font-weight: 650;
+  padding: 9px 11px;
+  line-height: 1.5;
+}
+
+.meeting-modal-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.meeting-modal-check input {
+  width: 14px;
+  height: 14px;
+}
+
+.meeting-upload {
+  cursor: pointer;
+}
+
+.meeting-upload input {
+  display: none;
+}
+
+.meeting-file-name {
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 错误块：多行文字 + 重试按钮 */
+.meeting-main .inline-error {
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.inline-error-text {
+  flex: 1;
+  white-space: pre-line;
+}
+
+.meeting-main .inline-error button {
+  margin-left: 8px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+}
+
+.meeting-settings-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.meeting-settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.meeting-settings-grid input,
+.meeting-settings-grid select {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.meeting-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(28, 32, 38, 0.92);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
+  pointer-events: none;
+}
+
+/* ── AI 供应商面板（cc-switch 风格） ───────────────────────────── */
+.llm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 24, 39, 0.38);
+  backdrop-filter: blur(3px);
+}
+
+.llm-panel {
+  width: min(760px, 92vw);
+  height: min(500px, 82vh);
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.llm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.llm-head strong {
+  display: block;
+  font-size: 14px;
+}
+
+.llm-head span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+.llm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  background: var(--surface-soft);
+}
+
+.llm-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.llm-item:hover {
+  background: var(--surface);
+}
+
+.llm-item.on {
+  border-color: color-mix(in srgb, var(--blue) 40%, var(--line));
+  background: var(--surface);
+}
+
+.llm-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.llm-item-host {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.llm-empty {
+  font-size: 11.5px;
+  color: var(--muted);
+  padding: 8px;
+}
+
+.llm-list-foot {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.llm-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line-strong, var(--line));
+  border-radius: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.llm-add select {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--muted);
+  outline: none;
+}
+
+.llm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.llm-note {
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.llm-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.llm-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-grid input {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.llm-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.llm-status {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-active-tag {
+  font-size: 11px;
+  color: var(--green, #16a34a);
+  border: 1px solid color-mix(in srgb, var(--green, #16a34a) 35%, var(--line));
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+/* 预设按钮网格 + 只读地址 */
+.llm-add-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-add-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.llm-preset {
+  padding: 7px 6px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.llm-preset:hover {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  background: var(--surface);
+}
+
+.llm-current {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.llm-locked-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.llm-grid select {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.llm-grid input.locked {
+  color: var(--muted);
+}
+
+/* ── 模型选择（列表式，简化版） ─────────────────────────── */
+.llm-panel-narrow {
+  width: min(520px, 92vw);
+  height: min(560px, 84vh);
+}
+
+.llm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.llm-row.on {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  background: color-mix(in srgb, var(--blue) 5%, var(--surface));
+}
+
+.llm-row-main {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.llm-row-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.llm-row-title em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.llm-row-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.llm-row-check {
+  color: var(--blue);
+}
+
+.llm-row-key {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 11px;
+}
+
+.llm-row-key input {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.llm-add-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.llm-add-row:hover {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  color: var(--ink);
+}
+
+.llm-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.llm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.llm-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.llm-chip.on {
+  border-color: color-mix(in srgb, var(--blue) 50%, var(--line));
+  color: var(--ink);
+  background: color-mix(in srgb, var(--blue) 7%, var(--surface));
+}
+
+.llm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.llm-field input,
+.llm-field select {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.llm-field input.locked {
+  color: var(--muted);
+}
+
+.llm-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.llm-foot-plain {
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+}
+
+.llm-fetch {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  color: var(--blue);
+  cursor: pointer;
+  padding: 0;
+}
+
+.llm-note-error {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.llm-row-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+
+.llm-row-tools select {
+  flex: 1;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+/* 注册邀请码 */
+.invite-fresh {
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, var(--line));
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--blue) 6%, var(--surface));
+}
+
+.invite-fresh p {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.invite-fresh-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.invite-fresh-row code {
+  flex: 1;
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--ink);
+}
+
+.invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.invite-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.invite-state {
+  font-size: 11px;
+  width: fit-content;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.invite-state.state-active {
+  color: var(--green, #16a34a);
+  border-color: color-mix(in srgb, var(--green, #16a34a) 40%, var(--line));
+}
+
+.invite-time {
+  font-size: 10.5px;
+  color: var(--muted);
+}
