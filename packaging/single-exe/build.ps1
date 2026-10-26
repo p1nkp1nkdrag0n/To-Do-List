@@ -19,6 +19,21 @@ if (-not (Test-Path (Join-Path $release "node.exe"))) {
 # sync latest launcher
 Copy-Item (Join-Path $root "packaging\launcher\launch.mjs") (Join-Path $release "launcher\launch.mjs") -Force
 
+# Refresh app/dist and app/dist-server from the repo first. Without this the
+# exe keeps shipping whatever build happened to be copied into release last
+# time, and UI fixes silently never reach the installer.
+$appDir = Join-Path $release "app"
+foreach ($name in @("dist", "dist-server", "licenses")) {
+    $target = Join-Path $appDir $name
+    if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+    Copy-Item (Join-Path $root $name) $target -Recurse -Force
+}
+foreach ($file in @("package.json", "package-lock.json", "LICENSE", "THIRD_PARTY_NOTICES.md")) {
+    $source = Join-Path $root $file
+    if (Test-Path $source) { Copy-Item $source (Join-Path $appDir $file) -Force }
+}
+Write-Host "refreshed app/dist and app/dist-server from the repo"
+
 Write-Host "Packing payload.zip (excluding runtime data) ..."
 if (Test-Path $payload) { Remove-Item $payload -Force }
 & tar -a -c -f $payload -C $release --exclude "ToDoList-data" --exclude "*.log" .

@@ -129,7 +129,11 @@ export async function chatJson(options: ChatJsonOptions): Promise<ChatJsonResult
       if (!response.ok) {
         const body = await response.text();
         if (response.status === 401 || response.status === 403) {
-          throw new Error("大模型密钥无效或已过期，请到设置里检查 API Key。");
+          // 把平台的原话带上，方便区分「Key 打错」和「这个 Key 不属于该平台」。
+          throw new Error(
+            `大模型密钥无效或已过期（HTTP ${response.status}）：${body.slice(0, 140)}。` +
+              "如果你刚换电脑或重装过，需要重新填一次 API Key。",
+          );
         }
         if (response.status === 429) {
           throw new Error("大模型调用太频繁或额度不足，稍等一会儿再试。");
