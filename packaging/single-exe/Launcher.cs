@@ -18,7 +18,11 @@ namespace ToDoListLauncher
                 string target = ChooseTarget(exeDir);
                 string marker = Path.Combine(target, ".extracted");
 
-                string tempZip = Path.Combine(Path.GetTempPath(), "todolist-payload.zip");
+                // 临时文件不能放 %TEMP%：有些机器连用户目录都写不了。
+                // 放到「程序目录的同级」，那里刚刚验证过可写。
+                string tempZip = Path.Combine(
+                    Path.GetDirectoryName(target.TrimEnd(Path.DirectorySeparatorChar)),
+                    "todolist-payload.zip");
                 using (Stream payload = Assembly.GetExecutingAssembly()
                     .GetManifestResourceStream("payload.zip"))
                 {
@@ -73,6 +77,16 @@ namespace ToDoListLauncher
                     child.WaitForExit();
                     return child.ExitCode;
                 }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("启动失败：没有权限在程序所在目录写文件。");
+                Console.Error.WriteLine("请把 ToDoList.exe 放到「桌面」或「文档」文件夹里再双击。");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("按任意键退出…");
+                Console.ReadKey(true);
+                return 1;
             }
             catch (Exception error)
             {
