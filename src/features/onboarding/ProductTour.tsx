@@ -168,7 +168,13 @@ export function ProductTour({ controller, onCreateProject }: ProductTourProps) {
       subtree: true,
     });
     const missingTimer = window.setTimeout(() => {
-      if (!targetElement && !disposed) setTargetMissing(true);
+      if (targetElement || disposed) return;
+      // 目标不存在（例如当前页面根本没这个区域）时，与其弹一个看不懂的
+      // 「页面尚未准备好」，不如直接收起引导，别挡住用户。
+      setTargetMissing(true);
+      window.setTimeout(() => {
+        if (!disposed) controller.snooze();
+      }, 1_500);
     }, 4_000);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);

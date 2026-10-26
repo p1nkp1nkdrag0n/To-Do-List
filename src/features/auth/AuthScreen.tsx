@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 import { BrandMark } from "../../components/BrandMark";
-import { api, errorMessage } from "../../lib/api";
+import { api, ApiError, errorMessage } from "../../lib/api";
 import type { AuthState } from "../../types";
 import { AsciiFlowCanvas } from "./AsciiFlowCanvas";
 
@@ -47,12 +47,39 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     };
   }, []);
 
+  /** 把后端返回的字段错误翻成一句中文（用户名最常见）。 */
+  const readableError = (caught: unknown): string => {
+    if (caught instanceof ApiError && caught.fieldErrors !== undefined) {
+      const field = caught.fieldErrors;
+      if (field.username !== undefined) {
+        return "用户名只能用字母、数字、下划线、点或短横线（3–32 位），不能用中文。";
+      }
+      if (field.password !== undefined) {
+        return "密码至少 8 位，且不能超过 72 个字节。";
+      }
+      if (field.displayName !== undefined) {
+        return "显示名称不能为空，最多 80 个字。";
+      }
+      const first = Object.values(field)[0]?.[0];
+      if (first !== undefined) return first;
+    }
+    return errorMessage(caught);
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError("");
     try {
       if (needsBootstrap === true) {
+        if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username)) {
+          setError("用户名只能用字母、数字、下划线、点或短横线（3–32 位），不能用中文。");
+          return;
+        }
+        if (password.length < 8) {
+          setError("密码至少 8 位。");
+          return;
+        }
         if (password !== confirmPassword) {
           setError("两次输入的密码不一致");
           return;
@@ -80,7 +107,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       const auth = await api.post<AuthState>("/api/auth/login", { username, password });
       onAuthenticated(auth);
     } catch (caught) {
-      setError(errorMessage(caught));
+      setError(readableError(caught));
     } finally {
       setBusy(false);
     }
