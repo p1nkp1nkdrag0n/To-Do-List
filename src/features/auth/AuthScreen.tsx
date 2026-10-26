@@ -13,6 +13,7 @@ import { BrandMark } from "../../components/BrandMark";
 import { api, ApiError, errorMessage } from "../../lib/api";
 import type { AuthState } from "../../types";
 import { AsciiFlowCanvas } from "./AsciiFlowCanvas";
+import { FirstRunGuide } from "./FirstRunGuide";
 
 interface AuthScreenProps {
   onAuthenticated: (auth: AuthState) => void;
@@ -116,6 +117,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   return (
     <main className="auth-page">
       <AsciiFlowCanvas />
+      <FirstRunGuide />
       <section className="auth-panel">
         <BrandMark auth />
         {needsBootstrap === true ? (
