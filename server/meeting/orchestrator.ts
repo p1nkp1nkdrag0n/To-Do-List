@@ -160,9 +160,14 @@ export class MeetingOrchestrator {
 
   /** 建立一个 MCP 子进程连接，跑完自动关闭。 */
   private async withClient<Result>(run: (client: Client) => Promise<Result>): Promise<Result> {
+    // 打包版会设置 MCP_ENTRY 指向编译后的 main.js；开发时仍走 tsx 直跑 TS。
+    const compiledEntry = process.env.MCP_ENTRY;
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: ["--import", "tsx", "server/mcp/main.ts"],
+      args:
+        compiledEntry !== undefined && compiledEntry !== ""
+          ? [compiledEntry]
+          : ["--import", "tsx", "server/mcp/main.ts"],
       cwd: this.options.cwd ?? process.cwd(),
       env: childEnvironment(this.options.env),
       stderr: "pipe",
