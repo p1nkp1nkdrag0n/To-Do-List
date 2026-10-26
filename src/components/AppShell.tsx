@@ -16,8 +16,7 @@ import {
   Sun,
   SunMoon,
   UserPlus,
-  KeyRound,
-} from "lucide-react";
+  KeyRound, CircleHelp } from "lucide-react";
 
 import type { PresenceUser } from "../../shared/realtime-contracts";
 import type { AppearanceController } from "../lib/useAppearance";
@@ -42,6 +41,7 @@ interface AppShellProps {
   onCreateProject: () => void;
   onInvite: () => void;
   onRegistrationInvites: () => void;
+  onOpenHelp: () => void;
   onProjectSettings: () => void;
   onLogout: () => void;
 }
@@ -77,6 +77,7 @@ export function AppShell({
   onCreateProject,
   onInvite,
   onRegistrationInvites,
+  onOpenHelp,
   onProjectSettings,
   onLogout,
 }: AppShellProps) {
@@ -212,6 +213,16 @@ export function AppShell({
             >
               <KeyRound size={17} />
               <span className="utility-label">注册邀请码</span>
+            </button>
+            <button
+              type="button"
+              aria-label="使用说明"
+              title={sidebarCollapsed ? "使用说明" : undefined}
+              data-tooltip="使用说明"
+              onClick={onOpenHelp}
+            >
+              <CircleHelp size={17} />
+              <span className="utility-label">使用说明</span>
             </button>
             <button
               type="button"

@@ -4,6 +4,7 @@ import { Archive, LoaderCircle, Plus } from "lucide-react";
 import { AppShell, type WorkspaceView } from "./components/AppShell";
 import { BrandMark } from "./components/BrandMark";
 import { AuthScreen } from "./features/auth/AuthScreen";
+import { HelpDialog } from "./features/help/HelpDialog";
 import { ProductTour } from "./features/onboarding/ProductTour";
 import { tourDefinition } from "./features/onboarding/tour-definitions";
 import type { TourSection } from "./features/onboarding/tour-types";
@@ -32,6 +33,7 @@ export default function App() {
   // 默认落在「会议」：先由会议纪要生成排期，再去看甘特图。
   const [activeView, setActiveView] = useState<WorkspaceView>("meeting");
   const [showCreateProject, setShowCreateProject] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showRegistrationInvites, setShowRegistrationInvites] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
@@ -182,6 +184,7 @@ export default function App() {
         onCreateProject={() => setShowCreateProject(true)}
         onInvite={() => setShowInvite(true)}
         onRegistrationInvites={() => setShowRegistrationInvites(true)}
+        onOpenHelp={() => setShowHelp(true)}
         onProjectSettings={() => setShowProjectSettings(true)}
         onLogout={() => void logout()}
       >
@@ -217,6 +220,7 @@ export default function App() {
           )}
         </Suspense>
       </AppShell>
+      {showHelp ? <HelpDialog onClose={() => setShowHelp(false)} /> : null}
       {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
       {showInvite ? <InviteDialog projectId={activeProject.project.id} projectName={activeProject.project.name} onClose={() => setShowInvite(false)} /> : null}
       <RegistrationInvitesDialog

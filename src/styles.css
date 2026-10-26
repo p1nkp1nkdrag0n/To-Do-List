@@ -1,4 +1,4 @@
-@layer legacy, tokens, base, components, shell, features, auth, onboarding, responsive;
+@layer legacy, tokens, base, components, shell, features, auth, onboarding, help, responsive;
 
 @import "./styles/legacy.css" layer(legacy);
 @import "./styles/tokens.css" layer(tokens);
@@ -9,4 +9,5 @@
 @import "./styles/meeting.css" layer(features);
 @import "./styles/auth.css" layer(auth);
 @import "./styles/onboarding.css" layer(onboarding);
+@import "./styles/help.css" layer(help);
 @import "./styles/responsive.css" layer(responsive);

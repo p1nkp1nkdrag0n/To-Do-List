@@ -1,0 +1,161 @@
+/* 使用说明对话框 */
+.help-layout {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  min-height: 420px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.help-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--glass-border);
+  background: var(--surface-soft);
+}
+
+.help-nav button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.help-nav button:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.help-nav button.active {
+  background: var(--surface-selected);
+  color: var(--accent, #2563eb);
+  font-weight: 600;
+}
+
+.help-body {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 18px 22px 26px;
+  /* 对话框是半透明玻璃，正文需要自己的底色，否则背后页面会透上来 */
+  background: var(--surface);
+}
+
+.help-body h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.help-body h4 {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.help-body p,
+.help-body li,
+.help-body dd {
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+
+.help-body ul,
+.help-body ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.help-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 18px;
+}
+
+.help-steps b {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.help-steps p {
+  margin: 2px 0 0;
+}
+
+.help-code {
+  overflow-x: auto;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--ink);
+}
+
+.help-body code {
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 4px;
+  font-size: 12.5px;
+}
+
+.help-table th,
+.help-table td {
+  border-bottom: 1px solid var(--glass-border);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+  color: var(--muted);
+}
+
+.help-table th {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--surface-soft);
+}
+
+.help-note {
+  margin-top: 10px;
+  border-left: 3px solid var(--accent, #2563eb);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-soft);
+  padding: 8px 12px;
+}
+
+.help-faq dt {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.help-faq dd {
+  margin: 3px 0 0;
+}
+
+@media (max-width: 720px) {
+  .help-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .help-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--glass-border);
+  }
+}
