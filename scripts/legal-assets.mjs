@@ -97,13 +97,24 @@ export function dependencyNotices(root) {
     let notices = noticeFiles(directory).map((name) => ({ name: `${location}/${name}`, data: text(path.join(directory, name)) }));
     if (!notices.some((item) => /licen[sc]e|copying|ofl/i.test(path.basename(item.name)))) {
       // Native npm wrappers use the same release's parent package license.
-      const parent = pkg.name.startsWith("@esbuild/") ? "esbuild" : pkg.name.startsWith("@rolldown/binding-") ? "rolldown" : null;
+      // 原生二进制包（esbuild / rolldown / napi-rs 等）不单独携带 LICENSE，
+      // 按惯例沿用同版本父包的许可证。
+      const parent = pkg.name.startsWith("@esbuild/")
+        ? "esbuild"
+        : pkg.name.startsWith("@rolldown/binding-")
+          ? "rolldown"
+          : pkg.name.startsWith("@napi-rs/canvas-")
+            ? "@napi-rs/canvas"
+            : null;
       if (parent) {
         const parentPath = path.join(root, "node_modules", parent);
         if (json(path.join(parentPath, "package.json")).version !== pkg.version) throw new Error(`Native license version mismatch: ${pkg.name}`);
         notices = noticeFiles(parentPath).map((name) => ({ name: `node_modules/${parent}/${name}`, data: text(path.join(parentPath, name)) }));
       } else if (pkg.name === "cookie-signature" && pkg.version === "1.0.7") {
         notices.push({ name: `${location}/Readme.md`, data: text(path.join(directory, "Readme.md")) });
+      } else if (pkg.name === "isarray" && pkg.version === "1.0.0") {
+        // 老包没有 LICENSE 文件，许可证正文写在 README 里（MIT）。
+        notices.push({ name: `${location}/README.md`, data: text(path.join(directory, "README.md")) });
       } else {
         throw new Error(`No complete license found for ${pkg.name}@${pkg.version}; review upstream before release.`);
       }
