@@ -785,27 +785,6 @@ export function MeetingView({
                     </article>
                   ))}
                 </div>
-              ) : revealed >= DEMO_TRANSCRIPT.length ? (
-                <div className="meeting-cards">
-                  {DEMO_TASKS.map((task) => {
-                    const broken =
-                      phase === "done" &&
-                      run !== undefined &&
-                      run.conflictsBefore > 0 &&
-                      (task.key === "T2" || task.key === "T3");
-                    return (
-                      <article className={`meeting-card ${broken && conflictsAfter > 0 ? "warn" : ""}`} key={task.key}>
-                        <h3>{task.title}</h3>
-                        <div className="meeting-meta">
-                          <span>{task.owner}</span>
-                          <span>{task.hours}h</span>
-                          <span>{task.startHint}</span>
-                          {task.dependency ? <span className="dep">{task.dependency}</span> : null}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
               ) : null}
 
               {run !== undefined ? (
