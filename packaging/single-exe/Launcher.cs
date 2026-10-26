@@ -18,6 +18,7 @@ namespace ToDoListLauncher
                 string target = ChooseTarget(exeDir);
                 string marker = Path.Combine(target, ".extracted");
 
+                string tempZip = Path.Combine(Path.GetTempPath(), "todolist-payload.zip");
                 using (Stream payload = Assembly.GetExecutingAssembly()
                     .GetManifestResourceStream("payload.zip"))
                 {
@@ -31,11 +32,29 @@ namespace ToDoListLauncher
                             ? "首次运行：正在解压程序文件（约 1 分钟，只需一次）…"
                             : "检测到新版本：正在更新程序文件（数据不受影响）…");
                         payload.Position = 0;
-                        if (Directory.Exists(target)) Directory.Delete(target, true);
-                        Directory.CreateDirectory(target);
-                        Extract(payload, target);
-                        File.WriteAllText(marker, fingerprint);
-                        Console.WriteLine("准备完成。");
+                        using (FileStream zipFile = File.Create(tempZip))
+                        {
+                            payload.CopyTo(zipFile);
+                        }
+                        for (int attempt = 1; attempt <= 2; attempt += 1)
+                        {
+                            if (Directory.Exists(target)) Directory.Delete(target, true);
+                            Directory.CreateDirectory(target);
+                            int count = Extract(tempZip, target);
+                            string missing = MissingSentinel(target);
+                            if (missing.Length == 0)
+                            {
+                                File.WriteAllText(marker, fingerprint);
+                                Console.WriteLine("准备完成（解压 " + count + " 个文件）。");
+                                break;
+                            }
+                            Console.WriteLine("解压不完整（缺少 " + missing + "），重试第 " + attempt + " 次…");
+                            if (attempt == 2)
+                            {
+                                throw new Exception("解压后仍缺少 " + missing + "，可能是磁盘空间不足或杀毒软件拦截。");
+                            }
+                        }
+                        File.Delete(tempZip);
                     }
                 }
 
@@ -68,9 +87,10 @@ namespace ToDoListLauncher
         }
 
         /// <summary>.NET Framework 的 ZipFile 只接受路径，这里直接从流里解包。</summary>
-        private static void Extract(Stream payload, string target)
+        private static int Extract(string zipPath, string target)
         {
-            using (var archive = new ZipArchive(payload, ZipArchiveMode.Read))
+            int count = 0;
+            using (var archive = ZipFile.OpenRead(zipPath))
             {
                 foreach (ZipArchiveEntry entry in archive.Entries)
                 {
@@ -91,8 +111,27 @@ namespace ToDoListLauncher
                         source.CopyTo(file);
                     }
                     try { File.SetLastWriteTime(destination, entry.LastWriteTime.DateTime); } catch { }
+                    count += 1;
                 }
             }
+            return count;
+        }
+
+        /// <summary>解压后必须存在的几个文件；返回缺失项，空字符串表示完整。</summary>
+        private static string MissingSentinel(string target)
+        {
+            string[] required =
+            {
+                "node.exe",
+                Path.Combine("app", "dist-server", "server", "v2.js"),
+                Path.Combine("app", "node_modules", "mammoth", "package.json"),
+                Path.Combine("app", "node_modules", "express", "package.json"),
+            };
+            foreach (string relative in required)
+            {
+                if (!File.Exists(Path.Combine(target, relative))) return relative;
+            }
+            return "";
         }
 
         /// <summary>用内容哈希当版本指纹：换了新 exe 就重新解压，旧数据保留。</summary>
