@@ -109,7 +109,6 @@ async function main() {
   writeConfig({ ...config, sessionSecret, port, dataPath: dataDir });
 
   fs.mkdirSync(dataDir, { recursive: true });
-  ensureFirewall(port);
 
   console.log(`\n数据目录：${dataDir}`);
   console.log("启动服务中…\n");
@@ -133,7 +132,7 @@ async function main() {
   child.stdout.on("data", (chunk) => process.stdout.write(String(chunk)));
   child.stderr.on("data", (chunk) => process.stderr.write(String(chunk)));
 
-  const localUrl = `http://localhost:${port}`;
+  const localUrl = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 30_000;
   let ready = false;
   while (Date.now() < deadline) {
@@ -153,6 +152,13 @@ async function main() {
     console.error("\n服务 30 秒内没有就绪，请把上面的报错发给我。");
     child.kill();
     process.exit(1);
+  }
+
+  // 服务已经起来了，再处理防火墙；失败也不影响本机使用。
+  try {
+    ensureFirewall(port);
+  } catch (error) {
+    console.log(`防火墙设置失败（不影响本机使用）：${error instanceof Error ? error.message : error}`);
   }
 
   const addresses = lanAddresses();
@@ -181,6 +187,18 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("启动失败：", error instanceof Error ? error.message : error);
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  console.error("\n启动失败：", error instanceof Error ? error.message : error);
+  try {
+    fs.mkdirSync(path.join(process.env.LOCALAPPDATA ?? os.homedir(), "ToDoList"), { recursive: true });
+    fs.appendFileSync(
+      path.join(process.env.LOCALAPPDATA ?? os.homedir(), "ToDoList", "launcher.log"),
+      `\n[${new Date().toISOString()}] 启动失败\n${message}\n`,
+      "utf8",
+    );
+    console.error("日志已写入：%LOCALAPPDATA%\\ToDoList\\launcher.log");
+  } catch {
+    // 写不了日志就算了。
+  }
   process.exit(1);
 });
