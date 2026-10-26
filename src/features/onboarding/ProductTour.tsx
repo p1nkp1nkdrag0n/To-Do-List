@@ -111,6 +111,8 @@ export function ProductTour({ controller, onCreateProject }: ProductTourProps) {
   const [retryToken, setRetryToken] = useState(0);
   const [position, setPosition] = useState<TourPosition>();
   const bubbleRef = useRef<HTMLElement>(null);
+  /** 连续找不到目标的次数：避免在坏页面上无限「下一步」。 */
+  const missingAdvancesRef = useRef(0);
 
   const definition = active ? tourDefinition(active.section) : undefined;
   const step = active && definition ? definition.steps[active.stepIndex] : undefined;
@@ -141,6 +143,7 @@ export function ProductTour({ controller, onCreateProject }: ProductTourProps) {
       }
       resizeObserver?.disconnect();
       targetElement = element;
+      missingAdvancesRef.current = 0;
       setTargetMissing(false);
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       element.scrollIntoView({
@@ -173,8 +176,32 @@ export function ProductTour({ controller, onCreateProject }: ProductTourProps) {
       // 「页面尚未准备好」，不如直接收起引导，别挡住用户。
       setTargetMissing(true);
       window.setTimeout(() => {
-        if (!disposed) controller.snooze();
-      }, 1_500);
+        if (disposed) return;
+
+        // 有些引导步骤只存在于甘特图（例如时间范围工具栏）。
+        // 用户从「会议」页进来时先切到甘特图再重试，而不是直接跳过。
+        const ganttNav = Array.from(document.querySelectorAll("nav.main-nav button")).find(
+          (button) => (button.textContent ?? "").includes("甘特图"),
+        ) as HTMLElement | undefined;
+        if (
+          active?.section === "workspace" &&
+          ganttNav !== undefined &&
+          document.querySelector('[data-tour-id="gantt-range-tools"]') === null
+        ) {
+          ganttNav.click();
+          window.setTimeout(() => {
+            if (!disposed) setRetryToken((value) => value + 1);
+          }, 600);
+          return;
+        }
+
+        if (missingAdvancesRef.current < 4) {
+          missingAdvancesRef.current += 1;
+          controller.next();
+          return;
+        }
+        controller.snooze();
+      }, 1_800);
     }, 4_000);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
