@@ -71,6 +71,16 @@ export const RegisterRequestSchema = z
   })
   .strict();
 
+export const BootstrapAdminRequestSchema = z
+  .object({
+    username: UsernameSchema,
+    displayName: DisplayNameSchema,
+    password: PasswordSchema,
+  })
+  .strict();
+
+export type BootstrapAdminRequest = z.infer<typeof BootstrapAdminRequestSchema>;
+
 export const LoginRequestSchema = z
   .object({
     username: UsernameSchema,

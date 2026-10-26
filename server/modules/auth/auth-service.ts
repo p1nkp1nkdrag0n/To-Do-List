@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import type { LoginRequest, RegisterRequest } from "../../../shared/contracts.js";
+import type {
+  BootstrapAdminRequest,
+  LoginRequest,
+  RegisterRequest,
+} from "../../../shared/contracts.js";
 import type { V2RuntimeDependencies } from "../../http/dependencies.js";
 import { HttpError } from "../../http/errors.js";
 import { writeActivity } from "../activity.js";
@@ -93,6 +97,96 @@ function publicUser(row: UserRow): PublicUser {
 
 export class AuthService {
   constructor(private readonly dependencies: V2RuntimeDependencies) {}
+
+  /** 空库（一个用户都没有）时才允许首启向导。 */
+  needsBootstrap(): boolean {
+    const count =
+      this.dependencies.database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM users",
+      )?.count ?? 0;
+    return count === 0;
+  }
+
+  /**
+   * 首启向导：创建第一个管理员并直接登录。
+   * 只有 users 为空时可用；一旦有账号，永久返回 409。
+   */
+  async bootstrapAdmin(
+    input: BootstrapAdminRequest,
+    _ipAddress: string,
+  ): Promise<{ token: string; user: PublicUser; teamMember: boolean }> {
+    const passwordHash = await this.dependencies.passwordHasher(input.password);
+
+    return this.dependencies.database.transaction(() => {
+      const count =
+        this.dependencies.database.get<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM users",
+        )?.count ?? 0;
+      if (count > 0) {
+        throw new HttpError(
+          409,
+          "BOOTSTRAP_CLOSED",
+          "这个系统已经初始化过了，请用邀请码注册。",
+        );
+      }
+
+      const now = this.dependencies.clock();
+      const userId = this.dependencies.idGenerator();
+      this.dependencies.database.run(
+        `INSERT INTO users
+          (id, username, password_hash, display_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          input.username,
+          passwordHash,
+          input.displayName,
+          now.toISOString(),
+          now.toISOString(),
+        ],
+      );
+      this.dependencies.database.run(
+        `INSERT INTO team_members (user_id, joined_at, invited_by)
+         VALUES (?, ?, NULL)`,
+        [userId, now.toISOString()],
+      );
+
+      const token = this.dependencies.sessionTokenGenerator();
+      const expiresAt = new Date(now.getTime() + SESSION_DURATION_MS);
+      this.dependencies.database.run(
+        `INSERT INTO sessions
+          (id, user_id, token_hash, expires_at, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          this.dependencies.idGenerator(),
+          userId,
+          sha256(token),
+          expiresAt.toISOString(),
+          now.toISOString(),
+          now.toISOString(),
+        ],
+      );
+      writeActivity(this.dependencies, {
+        actorId: userId,
+        entityType: "user",
+        entityId: userId,
+        action: "auth.bootstrap_admin",
+      });
+
+      return {
+        token,
+        user: {
+          id: userId,
+          username: input.username,
+          displayName: input.displayName,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          revision: 1,
+        },
+        teamMember: true,
+      };
+    });
+  }
 
   async register(input: RegisterRequest): Promise<{
     user: PublicUser;

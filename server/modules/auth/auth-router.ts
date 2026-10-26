@@ -1,6 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 
 import {
+  BootstrapAdminRequestSchema,
   LoginRequestSchema,
   RegisterRequestSchema,
 } from "../../../shared/contracts.js";
@@ -42,6 +43,26 @@ export function createAuthRouter(
       next(error);
     }
   };
+
+  /** 首启向导：只有空库时才需要/允许。 */
+  router.get("/bootstrap-status", (_request, response) => {
+    response.json({ needsBootstrap: service.needsBootstrap() });
+  });
+
+  router.post(
+    "/bootstrap",
+    asyncRoute(async (request, response) => {
+      const result = await service.bootstrapAdmin(
+        parseRequestBody(BootstrapAdminRequestSchema, request),
+        request.ip ?? request.socket.remoteAddress ?? "unknown",
+      );
+      response.cookie("team_session", result.token, {
+        ...cookieOptions,
+        maxAge: sessionDurationSeconds * 1000,
+      });
+      response.status(201).json({ user: result.user, teamMember: result.teamMember });
+    }),
+  );
 
   router.post(
     "/register",
