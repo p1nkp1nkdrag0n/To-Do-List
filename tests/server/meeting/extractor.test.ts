@@ -30,6 +30,19 @@ describe("会议纪要规则解析", () => {
     expect(tasks[0]!.estimatedHours).toBe(8);
   });
 
+  it("认「甲负责某事 + 工时」这种没有冒号的写法", () => {
+    const tasks = extractWithRules("甲负责订营地，2 个小时。", ["甲", "乙"]);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ ownerName: "甲", estimatedHours: 2 });
+    expect(tasks[0]!.title).toBe("订营地");
+  });
+
+  it("认「某事由甲负责」这种被动写法", () => {
+    const tasks = extractWithRules("订营地由甲负责，2 个小时。", ["甲", "乙"]);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.title).toBe("订营地");
+  });
+
   it("支持阿拉伯数字工时", () => {
     const tasks = extractWithRules("邱业恒：写脚本，4 小时，这周末前。", MEMBERS);
     expect(tasks[0]!.estimatedHours).toBe(4);

@@ -98,8 +98,17 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
     const hours = hoursFrom(line);
     if (hours === null) continue;
 
-    // 去掉「张工：」前缀，再砍掉「我来接 / 负责…」这类谓语尾巴
-    let title = line.replace(/^[^：:]{1,6}[:：]\s*/, "").trim();
+    // 标题里不能带名字，三种写法都要能认：
+    //   甲：订营地，2 小时
+    //   甲负责订营地，2 小时
+    //   订营地由甲负责，2 小时
+    let title = line.split(owner).join(" ");
+    title = title
+      .replace(/^[\s:：,，\-、]+/, "")
+      .replace(/^(负责|来做|做|完成|处理|跟进|牵头)[\s:：,，]*/, "")
+      .replace(/由\s*(负责|来做|来完成|完成|做)?/g, " ")
+      .replace(/负责/g, " ")
+      .trim();
     title = title.split(/[，,。；;]/)[0]!.trim();
     title = title.replace(/(我来接|我来做|我来写|我来调|我来|负责).*$/, "").trim();
     if (title.length < 2) continue;
