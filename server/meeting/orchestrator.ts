@@ -6,6 +6,9 @@
  *  - 编排器不直接写库，所有改动都通过 MCP 工具完成，保持单一写入口；
  *  - 每完成一次数据变更就回调 `onDataChanged`，由上层（API 进程）广播给浏览器。
  */
+import fs from "node:fs";
+import path from "node:path";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -160,8 +163,14 @@ export class MeetingOrchestrator {
 
   /** 建立一个 MCP 子进程连接，跑完自动关闭。 */
   private async withClient<Result>(run: (client: Client) => Promise<Result>): Promise<Result> {
-    // 打包版会设置 MCP_ENTRY 指向编译后的 main.js；开发时仍走 tsx 直跑 TS。
-    const compiledEntry = process.env.MCP_ENTRY;
+    // 打包版直接跑编译后的 main.js（不依赖 tsx）；开发态没有 dist-server 时退回 tsx。
+    const compiledCandidate = path.resolve(
+      this.options.cwd ?? process.cwd(),
+      "dist-server/server/mcp/main.js",
+    );
+    const compiledEntry =
+      process.env.MCP_ENTRY ??
+      (fs.existsSync(compiledCandidate) ? compiledCandidate : undefined);
     const transport = new StdioClientTransport({
       command: process.execPath,
       args:
