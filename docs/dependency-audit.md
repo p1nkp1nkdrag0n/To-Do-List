@@ -16,11 +16,24 @@ npm.cmd audit --omit=dev
 
 | 时间点 | 严重 | 高危 | 中危 | 低危 | 说明 |
 |---|---|---|---|---|---|
-| 修复前 | 2 | 10 | 1 | 1 | 含 `concurrently → shell-quote` 的命令注入 |
-| 修复后 | **0** | 10 | 1 | 1 | 已移除 `concurrently`，改用 `scripts/dev-run.mjs` |
+| 初始 | 2 | 10 | 1 | 1 | 含 `concurrently → shell-quote` 命令注入 |
+| 移除 concurrently 后 | 0 | 5 | 2 | 0 | 换成 `scripts/dev-run.mjs` |
+| **现在** | **0** | **0** | **0** | **0** | `npm audit fix` 升到修复版本后清零 |
 
-**为什么不能 `npm audit fix`**：所有条目 `fixAvailable: false`——也就是说当前 npm registry 上的
-**最新版本仍然带着这些问题**，官方还没发修复版本。`npm outdated` 也显示所有依赖已在最新范围。
+实际升级到的版本：
+
+| 包 | 修复前 | 现在 |
+|---|---|---|
+| express | 4.22.2 | 4.22.3 |
+| body-parser | 1.20.6 | 1.20.9 |
+| qs | 6.15.2 | 6.16.1 |
+| zod | 4.4.3 | 4.6.7 |
+| vite | 8.0.16 | 8.3.5 |
+| nanoid | 3.3.16 | 3.3.20 |
+| source-map-js | 1.2.1 | 1.2.2 |
+| proxy-addr | 2.0.7 | 2.0.8 |
+
+这些都是**同一个大版本内的补丁升级**（没有跨 major），`npm audit fix` 自动完成，未使用 `--force`。
 
 ## 逐条看：哪些真的会打到线上
 
@@ -34,12 +47,14 @@ npm.cmd audit --omit=dev
 | `postcss` / `nanoid` / `source-map-js` | 高 | 构建期正则/源映射 DoS | **构建期**，不进入运行时请求路径 | 跟随构建链升级 |
 | `concurrently` / `shell-quote` | 严重 | `quote()` 命令注入 | 只用于本地起服务 | ✅ **已移除**（换成自写启动脚本） |
 
-## 结论
+## 结论与验证
 
-1. **没有「一条命令清空」的修复**：所有条目上游都还没发修复版本。
-2. **严重级别的两项已经消除**（`concurrently` 链已移除）。
-3. 剩下的高危集中在 `express` / `zod` 的 DoS 类问题——**它们的利用前提是服务对公网开放**。
-4. 因此处置策略是：**比赛期间只在本机/局域网演示**；真要公网部署，先做下面这件事。
+1. `npm audit --omit=dev` 与全量 `npm audit` 现在都是 **0 漏洞**。
+2. 修复全部是**同 major 的补丁升级**，没有执行 `npm audit fix --force`。
+3. 升级后回归：类型检查 0 错误、`vitest` 368/372（4 个为 Windows 符号链接环境问题）、`npm run build` 通过、
+   `npm run demo` 正常起服务。
+4. **Playwright E2E 未能在本机复跑**：`playwright install chromium` 在这里被系统权限拦住
+   （`EPERM: ... ms-playwright`），换目录安装也超时。部署前建议在能装浏览器的机器上补跑一次。
 
 ## 部署前的检查清单
 
