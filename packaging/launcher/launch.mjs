@@ -17,9 +17,40 @@ const appRoot = path.resolve(here, "..", "app");
 const serverEntry = path.join(appRoot, "dist-server", "server", "v2.js");
 const mcpEntry = path.join(appRoot, "dist-server", "server", "mcp", "main.js");
 
-const configDir = path.join(process.env.APPDATA ?? os.homedir(), "ToDoList");
-const configPath = path.join(configDir, "config.json");
-const dataDir = path.join(process.env.LOCALAPPDATA ?? os.homedir(), "ToDoList", "data");
+/**
+ * 选一个真正可写的数据根目录。
+ * 有些机器（或受限账户）不允许往 %LOCALAPPDATA% 写，这时依次退到：
+ *   程序目录\ToDoList-data  →  系统临时目录\ToDoList
+ */
+function canWrite(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, ".write-test");
+    fs.writeFileSync(probe, "ok");
+    fs.unlinkSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pickDataRoot() {
+  const candidates = [
+    path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "ToDoList"),
+    path.join(appRoot, "..", "ToDoList-data"),
+    path.join(os.tmpdir(), "ToDoList"),
+  ];
+  for (const candidate of candidates) {
+    if (canWrite(candidate)) return candidate;
+  }
+  throw new Error(
+    "找不到可写的目录。请把程序放到「文档」或「桌面」下再试，或用管理员身份运行。",
+  );
+}
+
+const dataRoot = pickDataRoot();
+const configPath = path.join(dataRoot, "config.json");
+const dataDir = path.join(dataRoot, "data");
 
 function readConfig() {
   try {
@@ -30,7 +61,7 @@ function readConfig() {
 }
 
 function writeConfig(config) {
-  fs.mkdirSync(configDir, { recursive: true });
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
 }
 
