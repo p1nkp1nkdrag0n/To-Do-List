@@ -1,8 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { legalAssetsPlugin } from "./scripts/legal-assets.mjs";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), legalAssetsPlugin()],
   server: {
     port: 5173,
     // 原子写入工具会留下隐藏的临时目录，watcher 碰到会 EBUSY 崩掉，直接忽略。
