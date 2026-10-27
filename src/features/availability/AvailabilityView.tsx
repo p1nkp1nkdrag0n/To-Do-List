@@ -196,6 +196,19 @@ export function AvailabilityView({ projectId, currentUserId, online, invalidatio
         <div><button className="secondary-button" type="button" onClick={addProfile}><CalendarPlus size={16} />添加学期</button>{profile ? <button className="icon-button" type="button" onClick={removeProfile} disabled={!online} title="删除当前学期" aria-label="删除当前学期"><Trash2 size={16} /></button> : null}<button className="primary-button" type="button" onClick={() => void save()} disabled={!online || !dirty || saving}><Save size={16} />{saving ? "保存中…" : "保存更改"}</button></div>
       </header>
       {error ? <div className="inline-error"><AlertCircle size={15} />{error}</div> : null}
+      {profile !== undefined ? (
+        <p
+          className={`availability-usage${
+            paintedMinutes > profile.weeklyCapacityMinutes ? " over" : ""
+          }`}
+        >
+          已涂 {(paintedMinutes / 60).toFixed(1)} 小时 / 每周上限{" "}
+          {(profile.weeklyCapacityMinutes / 60).toFixed(1)} 小时
+          {paintedMinutes > profile.weeklyCapacityMinutes
+            ? `　⚠️ 超出 ${((paintedMinutes - profile.weeklyCapacityMinutes) / 60).toFixed(1)} 小时，超出的部分不会用于排期`
+            : null}
+        </p>
+      ) : null}
       {profile !== undefined && paintedMinutes === 0 ? (
         <div className="inline-error availability-warning">
           <AlertCircle size={15} />

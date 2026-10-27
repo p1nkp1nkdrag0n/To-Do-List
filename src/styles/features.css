@@ -1113,3 +1113,14 @@
 .availability-warning span {
   line-height: 1.7;
 }
+
+/* 可用时间：已涂时长与上限的对照 */
+.availability-usage {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.availability-usage.over {
+  color: #92400e;
+}
