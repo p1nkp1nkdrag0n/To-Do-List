@@ -108,9 +108,14 @@ export function DemoTutorial({ onClose }: { onClose: () => void }) {
           {step.tip !== undefined ? <p className="demo-tour-tip">⚠️ {step.tip}</p> : null}
         </div>
         <footer className="demo-tour-actions">
-          <button className="secondary-button" type="button" onClick={() => setIndex(0)} disabled={index === 0}>
-            回到第一步
-          </button>
+          <div>
+            <button className="secondary-button" type="button" onClick={() => setIndex(0)} disabled={index === 0}>
+              回到第一步
+            </button>
+            <button className="link-button" type="button" onClick={onClose}>
+              跳过教程
+            </button>
+          </div>
           <div>
             <button className="secondary-button" type="button" onClick={() => go(-1)} disabled={index === 0}>
               上一步

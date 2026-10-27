@@ -56,24 +56,28 @@ export default function App() {
     localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
   }, []);
 
-  // 第一次进入工作区时自动播放演示教程；之后可在侧栏随时打开。
-  useEffect(() => {
-    if (auth === undefined) return;
+  // 第一次进入系统必须先看完（或跳过）演示教程，之后才轮到分步引导。
+  const [tutorialDone, setTutorialDone] = useState(() => {
     try {
-      if (window.localStorage.getItem(DEMO_TOUR_KEY) === "1") return;
+      return window.localStorage.getItem(DEMO_TOUR_KEY) === "1";
     } catch {
-      return;
+      return false;
     }
-    const timer = window.setTimeout(() => {
-      setShowTutorial(true);
-      try {
-        window.localStorage.setItem(DEMO_TOUR_KEY, "1");
-      } catch {
-        // 存不进去也没关系。
-      }
-    }, 800);
-    return () => window.clearTimeout(timer);
-  }, [auth]);
+  });
+
+  useEffect(() => {
+    if (auth !== undefined && !tutorialDone) setShowTutorial(true);
+  }, [auth, tutorialDone]);
+
+  const finishTutorial = useCallback(() => {
+    try {
+      window.localStorage.setItem(DEMO_TOUR_KEY, "1");
+    } catch {
+      // 隐私模式下存不进去，本次关闭即可。
+    }
+    setShowTutorial(false);
+    setTutorialDone(true);
+  }, []);
 
   const loadWorkspace = useCallback(async (preferredProjectId?: string) => {
     const [projectResult, memberResult] = await Promise.all([
@@ -180,11 +184,13 @@ export default function App() {
           <button className="primary-button" type="button" data-tour-id="empty-create-project" onClick={() => setShowCreateProject(true)}><Plus size={16} />新建项目</button>
           <button className="secondary-button" type="button" onClick={() => setShowProjectSettings(true)}><Archive size={16} />项目归档与回收站</button>
         </section>
-        {showTutorial ? <DemoTutorial onClose={() => setShowTutorial(false)} /> : null}
+        {showTutorial ? <DemoTutorial onClose={finishTutorial} /> : null}
         {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
         {showProjectSettings ? <ProjectSettingsDialog teamMembers={teamMembers} online={online} guideProgress={tour.progress} onClose={() => setShowProjectSettings(false)} onChanged={loadWorkspace} onReplayGuide={replayGuide} onResetGuides={tour.resetAll} /> : null}
       </main>
-      <ProductTour controller={tour} onCreateProject={openGuidedProjectDialog} />
+      {!showTutorial && tutorialDone ? (
+        <ProductTour controller={tour} onCreateProject={openGuidedProjectDialog} />
+      ) : null}
       </>
     );
   }
@@ -244,7 +250,7 @@ export default function App() {
         </Suspense>
       </AppShell>
       {showHelp ? <HelpDialog onClose={() => setShowHelp(false)} /> : null}
-      {showTutorial ? <DemoTutorial onClose={() => setShowTutorial(false)} /> : null}
+      {showTutorial ? <DemoTutorial onClose={finishTutorial} /> : null}
       {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
       {showInvite ? <InviteDialog projectId={activeProject.project.id} projectName={activeProject.project.name} onClose={() => setShowInvite(false)} /> : null}
       <RegistrationInvitesDialog
@@ -252,7 +258,9 @@ export default function App() {
         onClose={() => setShowRegistrationInvites(false)}
       />
       {showProjectSettings ? <ProjectSettingsDialog project={activeProject} teamMembers={teamMembers} online={online} guideProgress={tour.progress} onClose={() => setShowProjectSettings(false)} onChanged={() => loadWorkspace(activeProject.project.id)} onReplayGuide={replayGuide} onResetGuides={tour.resetAll} /> : null}
-      <ProductTour controller={tour} onCreateProject={openGuidedProjectDialog} />
+      {!showTutorial && tutorialDone ? (
+        <ProductTour controller={tour} onCreateProject={openGuidedProjectDialog} />
+      ) : null}
     </>
   );
 }
