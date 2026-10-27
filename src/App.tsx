@@ -79,6 +79,13 @@ export default function App() {
     setTutorialDone(true);
   }, []);
 
+  // 工作区分步引导的步骤都在甘特图上；进入这一段时直接切过去，
+  // 免得第 4 步（时间范围工具栏）先显示「正在定位页面控件」再等切换。
+  useEffect(() => {
+    if (tour.active?.section !== "workspace" || !tour.viewportSupported) return;
+    if (activeView !== "gantt") setActiveView("gantt");
+  }, [tour.active?.section, tour.viewportSupported, activeView]);
+
   const loadWorkspace = useCallback(async (preferredProjectId?: string) => {
     const [projectResult, memberResult] = await Promise.all([
       api.get<{ projects: Project[] }>("/api/projects"),

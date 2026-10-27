@@ -202,7 +202,7 @@ export function ProductTour({ controller, onCreateProject }: ProductTourProps) {
         }
         controller.snooze();
       }, 1_800);
-    }, 4_000);
+    }, 800);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
 
