@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Modal } from "../../components/Modal";
+import { api } from "../../lib/api";
 
 const SEEN_KEY = "todolist.first-run-guide.v1";
 
@@ -10,13 +11,34 @@ const SEEN_KEY = "todolist.first-run-guide.v1";
  * 只在本机第一次打开时出现，点「我知道了」后不再打扰。
  */
 export function FirstRunGuide() {
-  const [open, setOpen] = useState(() => {
+  // 记住“读过”只对同一套安装有效；数据库被清空（回到首次运行）时要重新提示，
+  // 否则重装后新用户看不到这份说明。
+  const [seen, setSeen] = useState(() => {
     try {
-      return window.localStorage.getItem(SEEN_KEY) !== "1";
+      return window.localStorage.getItem(SEEN_KEY) === "1";
     } catch {
       return false;
     }
   });
+  const [dismissed, setDismissed] = useState(false);
+  const [needsBootstrap, setNeedsBootstrap] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<{ needsBootstrap: boolean }>("/api/auth/bootstrap-status")
+      .then((result) => {
+        if (!cancelled && result.needsBootstrap) setNeedsBootstrap(true);
+      })
+      .catch(() => {
+        // 读不到状态就按“已安装”处理，不额外打扰。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const open = !dismissed && (!seen || needsBootstrap);
 
   useEffect(() => {
     if (!open) return;
@@ -33,7 +55,8 @@ export function FirstRunGuide() {
     } catch {
       // 隐私模式写不进去也没关系，下次还会提示。
     }
-    setOpen(false);
+    setDismissed(true);
+    setSeen(true);
   };
 
   if (!open) return null;
