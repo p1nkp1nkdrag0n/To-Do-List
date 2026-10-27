@@ -4,6 +4,7 @@ import { Archive, LoaderCircle, Plus } from "lucide-react";
 import { AppShell, type WorkspaceView } from "./components/AppShell";
 import { BrandMark } from "./components/BrandMark";
 import { AuthScreen } from "./features/auth/AuthScreen";
+import { DemoTutorial, DEMO_TOUR_KEY } from "./features/help/DemoTutorial";
 import { HelpDialog } from "./features/help/HelpDialog";
 import { ProductTour } from "./features/onboarding/ProductTour";
 import { tourDefinition } from "./features/onboarding/tour-definitions";
@@ -34,6 +35,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<WorkspaceView>("meeting");
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showRegistrationInvites, setShowRegistrationInvites] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
@@ -53,6 +55,25 @@ export default function App() {
     setActiveProject(detail);
     localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
   }, []);
+
+  // 第一次进入工作区时自动播放演示教程；之后可在侧栏随时打开。
+  useEffect(() => {
+    if (auth === undefined) return;
+    try {
+      if (window.localStorage.getItem(DEMO_TOUR_KEY) === "1") return;
+    } catch {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setShowTutorial(true);
+      try {
+        window.localStorage.setItem(DEMO_TOUR_KEY, "1");
+      } catch {
+        // 存不进去也没关系。
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [auth]);
 
   const loadWorkspace = useCallback(async (preferredProjectId?: string) => {
     const [projectResult, memberResult] = await Promise.all([
@@ -159,6 +180,7 @@ export default function App() {
           <button className="primary-button" type="button" data-tour-id="empty-create-project" onClick={() => setShowCreateProject(true)}><Plus size={16} />新建项目</button>
           <button className="secondary-button" type="button" onClick={() => setShowProjectSettings(true)}><Archive size={16} />项目归档与回收站</button>
         </section>
+        {showTutorial ? <DemoTutorial onClose={() => setShowTutorial(false)} /> : null}
         {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
         {showProjectSettings ? <ProjectSettingsDialog teamMembers={teamMembers} online={online} guideProgress={tour.progress} onClose={() => setShowProjectSettings(false)} onChanged={loadWorkspace} onReplayGuide={replayGuide} onResetGuides={tour.resetAll} /> : null}
       </main>
@@ -185,6 +207,7 @@ export default function App() {
         onInvite={() => setShowInvite(true)}
         onRegistrationInvites={() => setShowRegistrationInvites(true)}
         onOpenHelp={() => setShowHelp(true)}
+        onOpenTutorial={() => setShowTutorial(true)}
         onProjectSettings={() => setShowProjectSettings(true)}
         onLogout={() => void logout()}
       >
@@ -221,6 +244,7 @@ export default function App() {
         </Suspense>
       </AppShell>
       {showHelp ? <HelpDialog onClose={() => setShowHelp(false)} /> : null}
+      {showTutorial ? <DemoTutorial onClose={() => setShowTutorial(false)} /> : null}
       {showCreateProject ? <CreateProjectDialog teamMembers={teamMembers} onClose={() => setShowCreateProject(false)} onCreated={projectCreated} /> : null}
       {showInvite ? <InviteDialog projectId={activeProject.project.id} projectName={activeProject.project.name} onClose={() => setShowInvite(false)} /> : null}
       <RegistrationInvitesDialog
