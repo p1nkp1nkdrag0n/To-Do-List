@@ -59,6 +59,8 @@ export interface MeetingRunResult {
   /** 本次应用的方案（撤销时用它反推）；没应用则是 null。 */
   appliedPlan: AppliedPlanRecord | null;
   durationMs: number;
+  /** 抽取阶段的提示（截断、跳过、无 Key 等），需要显示给用户。 */
+  warnings: string[];
 }
 
 export function createEvent(

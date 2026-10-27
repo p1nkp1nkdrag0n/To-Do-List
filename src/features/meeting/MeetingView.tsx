@@ -33,6 +33,7 @@ interface RunResponse {
   appliedPlanId: string | null;
   undoAvailable?: boolean;
   durationMs: number;
+  warnings?: string[];
   events: MeetingEventView[];
 }
 
@@ -783,6 +784,17 @@ export function MeetingView({
                         <span>来自纪要</span>
                       </div>
                     </article>
+                  ))}
+                </div>
+              ) : null}
+
+              {run?.warnings !== undefined && run.warnings.length > 0 ? (
+                <div className="meeting-warnings">
+                  {run.warnings.map((line, index) => (
+                    <p key={`${line}-${index}`}>
+                      <AlertCircle size={14} />
+                      <span>{line}</span>
+                    </p>
                   ))}
                 </div>
               ) : null}

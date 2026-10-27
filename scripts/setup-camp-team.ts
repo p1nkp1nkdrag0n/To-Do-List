@@ -25,7 +25,7 @@ const PROJECT_ID = "2d1c39a9-bf13-4310-8130-350f84872cec";
 /** 甲最闲、丁最忙，正好能造出「排不下」的冲突。 */
 const MEMBERS = [
   { username: "jia", displayName: "甲", capacity: 600, days: [1, 2, 3, 4, 5] },
-  { username: "yi", displayName: "乙", capacity: 480, days: [1, 3, 5] },
+  { username: "yi01", displayName: "乙", capacity: 480, days: [1, 3, 5] },
   { username: "bing", displayName: "丙", capacity: 360, days: [2, 4] },
   { username: "ding", displayName: "丁", capacity: 240, days: [6] },
 ];

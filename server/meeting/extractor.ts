@@ -24,7 +24,7 @@ export const ExtractedTaskSchema = z.object({
 });
 
 export const ExtractionSchema = z.object({
-  tasks: z.array(ExtractedTaskSchema).min(1).max(12),
+  tasks: z.array(ExtractedTaskSchema).min(1).max(60),
 });
 
 export type ExtractedTask = z.infer<typeof ExtractedTaskSchema>;
@@ -123,7 +123,7 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
       sourceQuote: line.slice(0, 120),
     });
   }
-  return tasks.slice(0, 12);
+  return tasks.slice(0, 30);
 }
 
 export async function extractTasksFromText(
@@ -149,11 +149,19 @@ export async function extractTasksFromText(
         schema: ExtractionSchema,
       });
       const parsed = result.value as z.infer<typeof ExtractionSchema>;
-      const unassigned = parsed.tasks.filter((task) => task.ownerName === "未分配");
-      const unknown = parsed.tasks.filter(
+      // 纪要较长时模型可能一次返回很多条：取前 30 条并说明，而不是整份判失败。
+      const CAP = 30;
+      const capped = parsed.tasks.length > CAP ? parsed.tasks.slice(0, CAP) : parsed.tasks;
+      if (parsed.tasks.length > CAP) {
+        warnings.push(
+          `纪要较长，这次只取了前 ${CAP} 条任务（模型返回 ${parsed.tasks.length} 条）。`,
+        );
+      }
+      const unassigned = capped.filter((task) => task.ownerName === "未分配");
+      const unknown = capped.filter(
         (task) => task.ownerName !== "未分配" && !memberNames.includes(task.ownerName),
       );
-      const valid = parsed.tasks.filter(
+      const valid = capped.filter(
         (task) => task.ownerName === "未分配" || memberNames.includes(task.ownerName),
       );
       if (unknown.length > 0) {
@@ -170,10 +178,12 @@ export async function extractTasksFromText(
       // 技术细节只进终端，给用户看的是人话。
       console.error("[extractor] 大模型抽取失败：", error);
       const message = error instanceof Error ? error.message : String(error);
+      // 把真实原因带上：之前一律说「没识别出任务」，会让人以为是纪要写得不好。
+      const detail = message.length > 140 ? `${message.slice(0, 140)}…` : message;
       warnings.push(
         message.includes("密钥") || message.includes("网络") || message.includes("超时")
-          ? `大模型暂时不可用（${message}），已回退到规则解析。`
-          : "大模型没有从这段纪要里识别出任务，已回退到规则解析。",
+          ? `大模型暂时不可用（${detail}），已回退到规则解析。`
+          : `大模型抽取失败（${detail}），已回退到规则解析。`,
       );
     }
   } else {

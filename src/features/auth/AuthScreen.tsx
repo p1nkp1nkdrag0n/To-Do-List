@@ -53,6 +53,9 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     if (caught instanceof ApiError && caught.fieldErrors !== undefined) {
       const field = caught.fieldErrors;
       if (field.username !== undefined) {
+        const raw = field.username[0] ?? "";
+        if (/Too small/i.test(raw)) return "用户名至少 3 个字符。";
+        if (/Too big/i.test(raw)) return "用户名最多 32 个字符。";
         return "用户名只能用字母、数字、下划线、点或短横线（3–32 位），不能用中文。";
       }
       if (field.password !== undefined) {

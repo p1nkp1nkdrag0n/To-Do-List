@@ -133,6 +133,14 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       setMessage("这看起来是接口地址，不是 API Key。Key 一般以 sk- 开头。");
       return;
     }
+    if (/\s/.test(pendingKey.trim())) {
+      setMessage("API Key 里不能有空格或换行，请重新复制一次。");
+      return;
+    }
+    if (pendingKey.trim().length < 20) {
+      setMessage(`这个 Key 只有 ${pendingKey.trim().length} 个字符，明显不完整，请重新复制。`);
+      return;
+    }
     setBusy("保存中…");
     try {
       await api.put(`/api/meeting/llm/providers/${provider.id}`, { apiKey: pendingKey.trim() });

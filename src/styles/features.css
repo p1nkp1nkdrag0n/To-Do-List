@@ -1101,3 +1101,15 @@
   font-size: 12px;
   line-height: 1.6;
 }
+
+/* 可用时间：还没涂格子时的提醒 */
+.availability-warning {
+  margin: 10px 0 0;
+  border-color: rgb(245 158 11 / 35%);
+  background: rgb(245 158 11 / 10%);
+  color: #92400e;
+}
+
+.availability-warning span {
+  line-height: 1.7;
+}

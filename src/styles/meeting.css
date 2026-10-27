@@ -1356,3 +1356,30 @@
   font-size: 10.5px;
   color: var(--muted);
 }
+
+/* 抽取阶段的提示（截断、跳过、无 Key） */
+.meeting-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.meeting-warnings p {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  border: 1px solid rgb(245 158 11 / 35%);
+  border-radius: 10px;
+  background: rgb(245 158 11 / 10%);
+  padding: 8px 11px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #92400e;
+}
+
+.meeting-warnings svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}

@@ -197,6 +197,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         clearedTasks,
         undoAvailable: lastApplied.has(projectId),
         durationMs: result.durationMs,
+        warnings: result.warnings,
         events: result.events,
       });
     }),

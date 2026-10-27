@@ -395,6 +395,7 @@ export class MeetingOrchestrator {
       events: this.eventLog,
       ...resolution,
       durationMs: Date.now() - startedAt,
+      warnings: [],
     };
   }
 
@@ -405,6 +406,8 @@ export class MeetingOrchestrator {
    */
   async runFromMinutes(minutes: string): Promise<MeetingRunResult> {
     const startedAt = Date.now();
+    // 抽取阶段的提示要在结果里带回给界面（截断 / 跳过 / 无 Key）。
+    let extractionWarnings: string[] = [];
     const projectId = this.options.projectId;
     const today = new Date().toISOString().slice(0, 10);
 
@@ -432,6 +435,7 @@ export class MeetingOrchestrator {
 
       // 2. 抽取
       const extraction = await extractTasksFromText(minutes, names, this.options.actingUserId);
+      extractionWarnings = extraction.warnings;
       this.emit({
         type: "tool.call",
         at: new Date().toISOString(),
@@ -586,6 +590,7 @@ export class MeetingOrchestrator {
       events: this.eventLog,
       ...resolution,
       durationMs: Date.now() - startedAt,
+      warnings: extractionWarnings,
     };
   }
 }
