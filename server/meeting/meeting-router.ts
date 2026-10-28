@@ -272,6 +272,18 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         throw new HttpError(400, "ASR_FORMAT", "不支持的音频格式：请用 mp3 / wav / m4a / aac / ogg。");
       }
       const audio = request.body;
+      let hotwords: string[] = [];
+      const rawHotwords = request.headers["x-hotwords"];
+      if (typeof rawHotwords === "string" && rawHotwords !== "") {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(rawHotwords)) as unknown;
+          if (Array.isArray(parsed)) {
+            hotwords = parsed.filter((item): item is string => typeof item === "string").slice(0, 200);
+          }
+        } catch {
+          // 热词格式不对就忽略，不影响转写。
+        }
+      }
       if (!Buffer.isBuffer(audio) || audio.length === 0) {
         throw new HttpError(400, "EMPTY_FILE", "没有收到音频内容。");
       }
@@ -282,6 +294,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         config,
         filename,
         audio,
+        hotwords,
         onProgress: (progress, note) => {
           const job = asrJobs.get(jobId);
           if (job !== undefined) Object.assign(job, { progress, note });

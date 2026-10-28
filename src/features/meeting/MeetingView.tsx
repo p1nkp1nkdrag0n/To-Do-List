@@ -371,6 +371,10 @@ export function MeetingView({
         headers: {
           "Content-Type": "application/octet-stream",
           "x-filename": encodeURIComponent(file.name),
+          // 把项目成员的名字作为热词，减少同音字误识别。
+          "x-hotwords": encodeURIComponent(
+            JSON.stringify(project.members.map((member) => member.displayName)),
+          ),
         },
         body: file,
       });

@@ -148,7 +148,7 @@ export async function uploadSlice(
 /** 3. 创建转写任务：盲分说话人 + 中文 + 口语顺滑。 */
 export async function createTask(
   config: AsrConfig,
-  input: { audioId: string; audioType: AudioFormat },
+  input: { audioId: string; audioType: AudioFormat; hotwords?: string[] },
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
   const body = new URLSearchParams({
@@ -160,6 +160,14 @@ export async function createTask(
     // -1 = 盲分：不预设人数，让模型自己聚类。会议人数不固定，这样最稳。
     speaker_number: "-1",
   });
+  // 项目成员的名字作为热词，避免「邱业恒」被听成「邱叶恒」这类同音错误。
+  const hotwords = (input.hotwords ?? []).map((word) => word.trim()).filter((word) => word.length >= 2 && word.length <= 10);
+  if (hotwords.length > 0) {
+    body.set(
+      "phrase_list",
+      JSON.stringify([{ name: "name", words: [...new Set(hotwords)].slice(0, 200), boost: 1 }]),
+    );
+  }
   const response = await fetchImpl(withQuery("/lasr-file-api/v2/task", config), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
@@ -243,6 +251,8 @@ export interface TranscribeOptions {
   config: AsrConfig;
   filename: string;
   audio: Uint8Array;
+  /** 项目成员名等热词，提升人名识别率。 */
+  hotwords?: string[];
   onProgress?: (progress: number, note: string) => void;
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -273,7 +283,11 @@ export async function transcribeAudio(options: TranscribeOptions): Promise<Trans
   }
 
   report(35, "创建转写任务");
-  const taskId = await createTask(options.config, { audioId, audioType }, fetchImpl);
+  const taskId = await createTask(
+    options.config,
+    { audioId, audioType, hotwords: options.hotwords },
+    fetchImpl,
+  );
 
   const deadline = Date.now() + (options.timeoutMs ?? 20 * 60 * 1000);
   let progress = 0;
