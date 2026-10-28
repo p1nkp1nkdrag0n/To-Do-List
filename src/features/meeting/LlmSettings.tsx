@@ -3,7 +3,7 @@
  * 一列可选模型，点一下就是当前使用；没有 key 的才需要填一次。
  * 新增入口在底部，点开才出预设，平时不占地方。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 
 import { Check, Plus, X } from "lucide-react";
 
@@ -42,6 +42,7 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   const [asrTab, setAsrTab] = useState<"import" | "manual">("import");
   const [importText, setImportText] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const [shareText, setShareText] = useState("");
   const [modelOptions, setModelOptions] = useState<
     Record<string, Array<{ id: string; name: string }>>
@@ -189,6 +190,8 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       setAdding(false);
       setPendingKey("");
       await load();
+      // 新加的模型在列表最上面，滚回去让它可见。
+      scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       setMessage("已添加");
     } catch (caught) {
       setMessage(errorMessage(caught));
@@ -276,14 +279,18 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
         <header className="llm-head">
           <div>
             <strong>模型</strong>
-            <span>选择一个用来处理会议纪要的大模型</span>
+            <span>
+              {view?.providers.find((provider) => provider.active) !== undefined
+                ? `当前：${view?.providers.find((provider) => provider.active)?.name} · ${view?.providers.find((provider) => provider.active)?.model}`
+                : "选择一个用来处理会议纪要的大模型"}
+            </span>
           </div>
           <button className="icon-button" type="button" aria-label="关闭" onClick={onClose}>
             <X size={16} />
           </button>
         </header>
 
-        <div className="llm-scroll">
+        <div className="llm-scroll" ref={scrollRef}>
           {adding ? (
             <AddProvider
               busy={busy !== ""}

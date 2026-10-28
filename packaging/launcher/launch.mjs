@@ -35,9 +35,11 @@ function canWrite(dir) {
 }
 
 function pickDataRoot() {
+  const exeDir = path.resolve(appRoot, "..", "..");
   const candidates = [
     path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "ToDoList"),
-    path.join(appRoot, "..", "ToDoList-data"),
+    // 放在 exe 同级，而不是解压目录里面：更新时解压目录会被整个删掉重建。
+    path.join(exeDir, "ToDoList-data"),
     path.join(os.tmpdir(), "ToDoList"),
   ];
   for (const candidate of candidates) {
@@ -49,6 +51,39 @@ function pickDataRoot() {
 }
 
 const dataRoot = pickDataRoot();
+
+// 旧版本把数据放在解压目录里（ToDoList-app\ToDoList-data），更新时会被删。
+// 新目录里还没有数据库时，把旧目录的数据并过来（只做一次）。
+try {
+  const legacyData = path.resolve(appRoot, "..", "ToDoList-data");
+  const legacyDb = path.join(legacyData, "data", "app.sqlite");
+  const newDb = path.join(dataRoot, "data", "app.sqlite");
+  const marker = path.join(dataRoot, ".migrated-from-app");
+  const newSize = fs.existsSync(newDb) ? fs.statSync(newDb).size : 0;
+  // 只在「新目录还是空库、且没迁移过」时把旧数据并过来，避免覆盖已有数据。
+  const shouldMigrate =
+    legacyData !== dataRoot &&
+    fs.existsSync(legacyDb) &&
+    !fs.existsSync(marker) &&
+    newSize <= 8 * 1024;
+  if (shouldMigrate) {
+    fs.mkdirSync(dataRoot, { recursive: true });
+    fs.cpSync(legacyData, dataRoot, { recursive: true, force: true });
+    // 旧库里记着旧路径的部署锁，换了目录会拒绝启动，迁移时一并清掉。
+    const dataDir = path.join(dataRoot, "data");
+    if (fs.existsSync(dataDir)) {
+      for (const name of fs.readdirSync(dataDir)) {
+        if (name.startsWith(".app.sqlite.deployment-lock")) {
+          fs.rmSync(path.join(dataDir, name), { recursive: true, force: true });
+        }
+      }
+    }
+    fs.writeFileSync(marker, new Date().toISOString(), "utf8");
+    console.log("已把旧版本的数据迁移到：" + dataRoot);
+  }
+} catch (error) {
+  console.log("旧数据迁移失败（不影响使用）：" + error.message);
+}
 const configPath = path.join(dataRoot, "config.json");
 const dataDir = path.join(dataRoot, "data");
 

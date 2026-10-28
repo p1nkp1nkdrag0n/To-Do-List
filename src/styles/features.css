@@ -1234,3 +1234,21 @@
   color: var(--muted);
   line-height: 1.7;
 }
+
+/* 模型列表的滚动条：默认太细，用户以为没有滚动 */
+.llm-scroll {
+  scrollbar-width: thin;
+}
+
+.llm-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.llm-scroll::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 55%);
+  border-radius: 4px;
+}
+
+.llm-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
