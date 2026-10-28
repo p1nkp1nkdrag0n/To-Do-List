@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, useRef } from "react";
 import { Archive, LoaderCircle, Plus } from "lucide-react";
 
 import { AppShell, type WorkspaceView } from "./components/AppShell";
@@ -79,12 +79,18 @@ export default function App() {
     setTutorialDone(true);
   }, []);
 
-  // 工作区分步引导的步骤都在甘特图上；进入这一段时直接切过去，
-  // 免得第 4 步（时间范围工具栏）先显示「正在定位页面控件」再等切换。
+  // 工作区分步引导的步骤都在甘特图上；刚进入这一段时切过去一次即可，
+  // 之后用户自己切到别的页面不能再被强行拉回来。
+  const forcedGanttRef = useRef(false);
   useEffect(() => {
-    if (tour.active?.section !== "workspace" || !tour.viewportSupported) return;
-    if (activeView !== "gantt") setActiveView("gantt");
-  }, [tour.active?.section, tour.viewportSupported, activeView]);
+    if (tour.active?.section !== "workspace" || !tour.viewportSupported) {
+      forcedGanttRef.current = false;
+      return;
+    }
+    if (forcedGanttRef.current) return;
+    forcedGanttRef.current = true;
+    setActiveView((current) => (current === "gantt" ? current : "gantt"));
+  }, [tour.active?.section, tour.viewportSupported]);
 
   const loadWorkspace = useCallback(async (preferredProjectId?: string) => {
     const [projectResult, memberResult] = await Promise.all([
