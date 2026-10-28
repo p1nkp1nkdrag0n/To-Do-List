@@ -415,7 +415,12 @@ export function MeetingView({
       throw new Error("等待转写结果超时，请稍后重试。");
     } catch (caught) {
       setAudioJob(null);
-      setError(errorMessage(caught));
+      const message = errorMessage(caught);
+      setError(message);
+      if (message.includes("还没有配置")) {
+        // 没配思必驰时直接把设置面板打开，省得用户在空页面上找不到原因。
+        setSettingsOpen(true);
+      }
     }
   }, []);
 
@@ -602,6 +607,17 @@ export function MeetingView({
             );
           })}
         </div>
+        {error !== "" && run === undefined ? (
+          <div className="inline-error">
+            <AlertCircle size={16} />
+            <div className="inline-error-text">{error}</div>
+            {error.includes("配置") || error.includes("Key") ? (
+              <button className="secondary-button" type="button" onClick={() => void openLlmSettings()}>
+                <Settings2 size={14} /> 去配置
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {audioJob !== null ? (
           <div className="meeting-warnings">
             <p>
