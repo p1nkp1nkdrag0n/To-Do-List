@@ -28,6 +28,7 @@ import { asyncRoute } from "../http/routing.js";
 import { MeetingControl } from "./control.js";
 import { asrConfigView, readAsrConfig, writeAsrConfig, AsrConfigSchema } from "./asr-config.js";
 import { AsrError, audioFormatFor, transcribeAudio } from "./asr.js";
+import { correctTranscript } from "./asr-correct.js";
 import { chatJson } from "./llm.js";
 import {
   activateProvider,
@@ -300,12 +301,20 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
           if (job !== undefined) Object.assign(job, { progress, note });
         },
       })
-        .then((transcript) => {
+        .then(async (transcript) => {
+          // 用大模型按热词校正同音字；没有配置大模型或失败时保留原文。
+          const job = asrJobs.get(jobId);
+          if (job !== undefined) Object.assign(job, { progress: 99, note: "校对转写文本" });
+          const corrected = await correctTranscript({
+            userId: response.locals.auth.user.id,
+            text: transcript.text,
+            hotwords,
+          });
           asrJobs.set(jobId, {
             status: "done",
             progress: 100,
             note: "转写完成",
-            text: transcript.text,
+            text: corrected,
             segments: transcript.segments,
             durationMs: transcript.durationMs,
             createdAt: Date.now(),

@@ -109,3 +109,17 @@ describe("思必驰录音文件转写客户端", () => {
     expect(body).toContain("speaker_number=-1");
   });
 });
+
+describe("转写纠错", () => {
+  it("没有配置大模型时原样返回", async () => {
+    const { correctTranscript } = await import("../../../server/meeting/asr-correct.js");
+    const text = "秋叶恒负责演示脚本。";
+    await expect(correctTranscript({ userId: "no-such-user", text, hotwords: ["邱业恒"] })).resolves.toBe(text);
+  });
+
+  it("没有热词时原样返回", async () => {
+    const { correctTranscript } = await import("../../../server/meeting/asr-correct.js");
+    const text = "秋叶恒负责演示脚本。";
+    await expect(correctTranscript({ userId: "no-such-user", text, hotwords: [] })).resolves.toBe(text);
+  });
+});

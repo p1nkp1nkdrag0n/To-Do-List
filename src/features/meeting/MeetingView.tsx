@@ -745,7 +745,7 @@ export function MeetingView({
                 rows={3}
                 value={hotwordText}
                 onChange={(event) => setHotwordText(event.target.value)}
-                placeholder="项目成员名、专有名词，用顿号或换行分隔&#10;例如：邱业恒、张工、甘特图、答辩"
+                placeholder="项目成员名、专有名词，用顿号或换行分隔"
               />
             </label>
             {audioHint !== "" ? <p className="form-error">{audioHint}</p> : null}
