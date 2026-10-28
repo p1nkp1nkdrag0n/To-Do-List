@@ -51,6 +51,20 @@ function pickDataRoot() {
 }
 
 const dataRoot = pickDataRoot();
+const exeDir = path.resolve(appRoot, "..", "..");
+
+// 测试模式：exe 同级放一个 RESET_KEYS.txt，每次启动清空已保存的 Key。
+// 删掉这个文件就恢复正常（Key 会保留）。
+try {
+  if (fs.existsSync(path.join(exeDir, "RESET_KEYS.txt"))) {
+    for (const name of ["asr", "llm"]) {
+      fs.rmSync(path.join(dataRoot, "data", name), { recursive: true, force: true });
+    }
+    console.log("测试模式：已清空保存的 Key（删除 RESET_KEYS.txt 可关闭）");
+  }
+} catch {
+  // 清不掉就继续，至少不阻塞启动。
+}
 
 // 旧版本把数据放在解压目录里（ToDoList-app\ToDoList-data），更新时会被删。
 // 新目录里还没有数据库时，把旧目录的数据并过来（只做一次）。
