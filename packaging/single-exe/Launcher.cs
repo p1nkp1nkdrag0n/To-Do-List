@@ -42,22 +42,9 @@ namespace ToDoListLauncher
                         }
                         for (int attempt = 1; attempt <= 2; attempt += 1)
                         {
-                            // 数据目录绝不能被解压覆盖删掉；万一它在 target 里，先挪出来。
-                            string preserved = null;
-                            string dataDir = Path.Combine(target, "ToDoList-data");
-                            if (Directory.Exists(dataDir))
-                            {
-                                preserved = target.TrimEnd(Path.DirectorySeparatorChar) + "-data-preserved";
-                                if (Directory.Exists(preserved)) Directory.Delete(preserved, true);
-                                Directory.Move(dataDir, preserved);
-                            }
                             if (Directory.Exists(target)) Directory.Delete(target, true);
                             Directory.CreateDirectory(target);
                             int count = Extract(tempZip, target);
-                            if (preserved != null && Directory.Exists(preserved))
-                            {
-                                Directory.Move(preserved, Path.Combine(target, "ToDoList-data"));
-                            }
                             string missing = MissingSentinel(target);
                             if (missing.Length == 0)
                             {
