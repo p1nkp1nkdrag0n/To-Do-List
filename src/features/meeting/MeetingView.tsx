@@ -99,6 +99,7 @@ export function MeetingView({
   const [audioOpen, setAudioOpen] = useState(false);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [hotwordText, setHotwordText] = useState("");
+  const [audioHint, setAudioHint] = useState("");
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 顶部提示：录音接口暂时空着，点了给一句人话。 */
@@ -362,7 +363,9 @@ export function MeetingView({
 
   const pickAudio = useCallback(() => {
     setAudioFile(null);
-    setHotwordText(project.members.map((member) => member.displayName).join("、"));
+    // 默认留空：用户点「从项目成员填入」才带入，避免让人以为名字是自动抓的。
+    setHotwordText("");
+    setAudioHint("");
     setAudioOpen(true);
   }, [project.members]);
 
@@ -745,6 +748,7 @@ export function MeetingView({
                 placeholder="项目成员名、专有名词，用顿号或换行分隔&#10;例如：邱业恒、张工、甘特图、答辩"
               />
             </label>
+            {audioHint !== "" ? <p className="form-error">{audioHint}</p> : null}
             <div className="meeting-modal-foot">
               <button
                 className="link-button"
@@ -760,9 +764,12 @@ export function MeetingView({
               <button
                 className="primary-button"
                 type="button"
-                disabled={audioFile === null || audioJob !== null}
+                disabled={audioJob !== null}
                 onClick={() => {
-                  if (audioFile === null) return;
+                  if (audioFile === null) {
+                    setAudioHint("请先选择音频文件，再点「开始转写」。");
+                    return;
+                  }
                   const words = hotwordText
                     .split(/[、,，\n]/)
                     .map((word) => word.trim())
