@@ -1383,3 +1383,16 @@
   margin-top: 2px;
   flex-shrink: 0;
 }
+
+/* 录音上传弹窗里的热词输入 */
+.meeting-audio-hotwords {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.meeting-audio-hotwords textarea {
+  min-height: 72px;
+}

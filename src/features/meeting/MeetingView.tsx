@@ -96,6 +96,9 @@ export function MeetingView({
   const [minutesFileName, setMinutesFileName] = useState("");
   const [uploadingMinutes, setUploadingMinutes] = useState(false);
   const [audioJob, setAudioJob] = useState<{ progress: number; note: string } | null>(null);
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [hotwordText, setHotwordText] = useState("");
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 顶部提示：录音接口暂时空着，点了给一句人话。 */
@@ -358,11 +361,13 @@ export function MeetingView({
   }, []);
 
   const pickAudio = useCallback(() => {
-    audioInputRef.current?.click();
-  }, []);
+    setAudioFile(null);
+    setHotwordText(project.members.map((member) => member.displayName).join("、"));
+    setAudioOpen(true);
+  }, [project.members]);
 
   /** 选好音频：上传 → 后台转写 → 轮询 → 自动填进纪要框。 */
-  const uploadAudio = useCallback(async (file: File) => {
+  const uploadAudio = useCallback(async (file: File, hotwords: string[]) => {
     setAudioJob({ progress: 1, note: "上传中" });
     setError("");
     try {
@@ -372,9 +377,9 @@ export function MeetingView({
           "Content-Type": "application/octet-stream",
           "x-filename": encodeURIComponent(file.name),
           // 把项目成员的名字作为热词，减少同音字误识别。
-          "x-hotwords": encodeURIComponent(
-            JSON.stringify(project.members.map((member) => member.displayName)),
-          ),
+          ...(hotwords.length > 0
+            ? { "x-hotwords": encodeURIComponent(JSON.stringify(hotwords)) }
+            : {}),
         },
         body: file,
       });
@@ -594,17 +599,6 @@ export function MeetingView({
             );
           })}
         </div>
-        <input
-          ref={audioInputRef}
-          type="file"
-          accept=".mp3,.m4a,.wav,.aac,.ogg,.opus,audio/*"
-          style={{ display: "none" }}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file !== undefined) void uploadAudio(file);
-            event.target.value = "";
-          }}
-        />
         {audioJob !== null ? (
           <div className="meeting-warnings">
             <p>
@@ -710,6 +704,79 @@ export function MeetingView({
           </div>
         ) : null}
       </header>
+
+      {audioOpen ? (
+        <div className="meeting-modal-mask">
+          <div className="meeting-modal glass-panel" role="dialog" aria-modal="true">
+            <div className="meeting-modal-head">
+              <strong>上传会议录音</strong>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="关闭"
+                onClick={() => setAudioOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <p className="meeting-modal-hint">
+              支持 mp3 / wav / m4a / aac / ogg，单个文件 5 小时、500MB 以内。转写完成后会自动填入纪要框。
+            </p>
+            <label className="meeting-upload">
+              <Upload size={15} />
+              {audioFile === null ? "选择音频文件" : `已选择：${audioFile.name}`}
+              <input
+                ref={audioInputRef}
+                type="file"
+                accept=".mp3,.m4a,.wav,.aac,.ogg,.opus,audio/*"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file !== undefined) setAudioFile(file);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+            <label className="meeting-audio-hotwords">
+              <span>识别热词（选填）</span>
+              <textarea
+                rows={3}
+                value={hotwordText}
+                onChange={(event) => setHotwordText(event.target.value)}
+                placeholder="项目成员名、专有名词，用顿号或换行分隔&#10;例如：邱业恒、张工、甘特图、答辩"
+              />
+            </label>
+            <div className="meeting-modal-foot">
+              <button
+                className="link-button"
+                type="button"
+                onClick={() => setHotwordText(project.members.map((member) => member.displayName).join("、"))}
+              >
+                从项目成员填入
+              </button>
+              <span className="meeting-modal-hint">热词能显著减少人名被听成同音字</span>
+              <button className="secondary-button" type="button" onClick={() => setAudioOpen(false)}>
+                取消
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={audioFile === null || audioJob !== null}
+                onClick={() => {
+                  if (audioFile === null) return;
+                  const words = hotwordText
+                    .split(/[、,，\n]/)
+                    .map((word) => word.trim())
+                    .filter((word) => word !== "");
+                  setAudioOpen(false);
+                  void uploadAudio(audioFile, words);
+                }}
+              >
+                开始转写
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {minutesOpen ? (
         <div className="meeting-modal-mask">
