@@ -1124,3 +1124,53 @@
 .availability-usage.over {
   color: #92400e;
 }
+
+/* 语音转写配置（AI 设置面板底部） */
+.llm-asr {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 14px;
+}
+
+.llm-asr strong {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.llm-asr p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.llm-asr label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.llm-asr input {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.llm-asr-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.llm-asr-actions span {
+  font-size: 12px;
+  color: var(--muted);
+}

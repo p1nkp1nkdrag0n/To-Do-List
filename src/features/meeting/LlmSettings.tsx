@@ -35,6 +35,10 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   /** 每个供应商可选的模型（预设 + 从平台拉到的）。 */
+  const [asr, setAsr] = useState<{ productId: string; keyHint: string; hasKey: boolean }>();
+  const [asrProductId, setAsrProductId] = useState("");
+  const [asrKey, setAsrKey] = useState("");
+  const [asrMessage, setAsrMessage] = useState("");
   const [modelOptions, setModelOptions] = useState<
     Record<string, Array<{ id: string; name: string }>>
   >({});
@@ -75,6 +79,15 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       setPendingKey("");
       setMessage("");
       void load();
+      setAsrMessage("");
+      setAsrKey("");
+      void api
+        .get<{ productId: string; keyHint: string; hasKey: boolean }>("/api/meeting/asr-config")
+        .then((config) => {
+          setAsr(config);
+          setAsrProductId(config.productId);
+        })
+        .catch(() => setAsr(undefined));
     }
   }, [open, load]);
 
@@ -182,6 +195,29 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
 
   if (!open) return null;
 
+  const saveAsr = async () => {
+    if (asrProductId.trim() === "") {
+      setAsrMessage("请先填 productId（DUI 控制台创建产品后生成）。");
+      return;
+    }
+    if (asrKey.trim() !== "" && asrKey.trim().length < 12) {
+      setAsrMessage("这个 apiKey 太短了，请重新复制。");
+      return;
+    }
+    setAsrMessage("保存中…");
+    try {
+      const next = await api.put<{ productId: string; keyHint: string; hasKey: boolean }>(
+        "/api/meeting/asr-config",
+        { productId: asrProductId.trim(), apiKey: asrKey.trim() === "" ? undefined : asrKey.trim() },
+      );
+      setAsr(next);
+      setAsrKey("");
+      setAsrMessage("已保存，可以上传录音了。");
+    } catch (caught) {
+      setAsrMessage(errorMessage(caught));
+    }
+  };
+
   return (
     <div className="llm-mask" role="dialog" aria-modal="true">
       <div className="llm-panel llm-panel-narrow">
@@ -274,6 +310,37 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
               <button className="llm-add-row" type="button" onClick={() => setAdding(true)}>
                 <Plus size={15} /> 添加模型
               </button>
+
+              <div className="llm-asr">
+                <strong>语音转写（思必驰）</strong>
+                <p>
+                  上传会议录音自动转成纪要需要这组凭证：DUI 控制台 → 基础技术 → 创建产品 → 开通「录音文件长语音转写」
+                  → 服务授权填 IP 白名单 → 生成 apiKey。
+                </p>
+                <label>
+                  productId
+                  <input
+                    value={asrProductId}
+                    onChange={(event) => setAsrProductId(event.target.value)}
+                    placeholder="例如 278578090"
+                  />
+                </label>
+                <label>
+                  apiKey
+                  <input
+                    type="password"
+                    value={asrKey}
+                    onChange={(event) => setAsrKey(event.target.value)}
+                    placeholder={asr?.hasKey === true ? `已保存 ${asr.keyHint}，留空则不修改` : "粘贴 apiKey"}
+                  />
+                </label>
+                <div className="llm-asr-actions">
+                  <button className="primary-button" type="button" onClick={() => void saveAsr()}>
+                    保存
+                  </button>
+                  <span>{asrMessage !== "" ? asrMessage : asr?.hasKey === true ? "已配置" : "未配置"}</span>
+                </div>
+              </div>
 
               {view?.envAvailable === true ? (
                 <p className="llm-note">

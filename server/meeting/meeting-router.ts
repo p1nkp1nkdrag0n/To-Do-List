@@ -19,11 +19,15 @@ import { AvailabilityService } from "../modules/availability/availability-servic
 import type { AuthLocals } from "../modules/auth/auth-router.js";
 import { MeetingOrchestrator } from "./orchestrator.js";
 
+import { randomUUID } from "node:crypto";
+
 import express from "express";
 
 import { asyncRoute } from "../http/routing.js";
 
 import { MeetingControl } from "./control.js";
+import { asrConfigView, readAsrConfig, writeAsrConfig, AsrConfigSchema } from "./asr-config.js";
+import { AsrError, audioFormatFor, transcribeAudio } from "./asr.js";
 import { chatJson } from "./llm.js";
 import {
   activateProvider,
@@ -83,6 +87,27 @@ function saveLastApplied(plans: Map<string, AppliedPlanRecord>): void {
     fs.writeFileSync(LAST_PLAN_FILE, JSON.stringify(Object.fromEntries(plans), null, 2));
   } catch {
     // 落盘失败不影响主流程，最坏情况就是重启后不能撤销。
+  }
+}
+
+interface AsrJob {
+  status: "running" | "done" | "error";
+  progress: number;
+  note: string;
+  text?: string;
+  segments?: Array<{ startMs: number; endMs: number; text: string; speaker: number | null }>;
+  durationMs?: number;
+  createdAt: number;
+}
+
+/** 转写任务放在内存里即可：进程重启后用户可以重新上传。 */
+const asrJobs = new Map<string, AsrJob>();
+const ASR_JOB_TTL_MS = 60 * 60 * 1000;
+
+function pruneAsrJobs(): void {
+  const now = Date.now();
+  for (const [id, job] of asrJobs) {
+    if (now - job.createdAt > ASR_JOB_TTL_MS) asrJobs.delete(id);
   }
 }
 
@@ -202,6 +227,92 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       });
     }),
   );
+
+  /** 语音转写：读/存思必驰的 productId + apiKey（每个用户一份）。 */
+  router.get("/asr-config", (_request, response) => {
+    response.json(asrConfigView(readAsrConfig(response.locals.auth.user.id)));
+  });
+
+  router.put("/asr-config", (request, response) => {
+    const input = parseRequestBody(
+      z
+        .object({
+          productId: z.string().trim().min(1).max(64),
+          apiKey: z.string().trim().max(200).optional(),
+        })
+        .strict(),
+      request,
+    );
+    const userId = response.locals.auth.user.id;
+    const existing = readAsrConfig(userId);
+    const apiKey = input.apiKey !== undefined && input.apiKey !== "" ? input.apiKey : existing?.apiKey;
+    if (apiKey === undefined || apiKey === "") {
+      throw new HttpError(400, "ASR_KEY_REQUIRED", "第一次配置需要填 apiKey。");
+    }
+    writeAsrConfig(userId, AsrConfigSchema.parse({ version: 1, productId: input.productId, apiKey }));
+    response.json(asrConfigView(readAsrConfig(userId)));
+  });
+
+  /** 上传音频，后台转写；前端轮询下面的状态接口。 */
+  router.post(
+    "/transcribe",
+    express.raw({ type: "*/*", limit: "200mb" }),
+    asyncRoute(async (request, response) => {
+      const config = readAsrConfig(response.locals.auth.user.id);
+      if (config === null) {
+        throw new HttpError(409, "ASR_NOT_CONFIGURED", "还没有配置思必驰的 productId / apiKey。");
+      }
+      let filename = String(request.headers["x-filename"] ?? "audio.mp3");
+      try {
+        filename = decodeURIComponent(filename);
+      } catch {
+        // 文件名没编码过，按原样用。
+      }
+      if (audioFormatFor(filename) === null) {
+        throw new HttpError(400, "ASR_FORMAT", "不支持的音频格式：请用 mp3 / wav / m4a / aac / ogg。");
+      }
+      const audio = request.body;
+      if (!Buffer.isBuffer(audio) || audio.length === 0) {
+        throw new HttpError(400, "EMPTY_FILE", "没有收到音频内容。");
+      }
+
+      const jobId = randomUUID();
+      asrJobs.set(jobId, { status: "running", progress: 0, note: "准备上传", createdAt: Date.now() });
+      void transcribeAudio({
+        config,
+        filename,
+        audio,
+        onProgress: (progress, note) => {
+          const job = asrJobs.get(jobId);
+          if (job !== undefined) Object.assign(job, { progress, note });
+        },
+      })
+        .then((transcript) => {
+          asrJobs.set(jobId, {
+            status: "done",
+            progress: 100,
+            note: "转写完成",
+            text: transcript.text,
+            segments: transcript.segments,
+            durationMs: transcript.durationMs,
+            createdAt: Date.now(),
+          });
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof AsrError ? error.message : error instanceof Error ? error.message : String(error);
+          asrJobs.set(jobId, { status: "error", progress: 0, note: message, createdAt: Date.now() });
+        });
+
+      response.status(202).json({ jobId });
+    }),
+  );
+
+  router.get("/transcribe/:jobId", (request, response) => {
+    pruneAsrJobs();
+    const job = asrJobs.get(request.params.jobId);
+    if (job === undefined) throw new HttpError(404, "ASR_JOB_NOT_FOUND", "找不到这个转写任务。");
+    response.json(job);
+  });
 
   /**
    * 上传纪要文件（txt / docx / pdf），返回抽好的纯文本。

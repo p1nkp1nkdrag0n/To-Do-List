@@ -95,6 +95,8 @@ export function MeetingView({
   const [replaceSchedule, setReplaceSchedule] = useState(true);
   const [minutesFileName, setMinutesFileName] = useState("");
   const [uploadingMinutes, setUploadingMinutes] = useState(false);
+  const [audioJob, setAudioJob] = useState<{ progress: number; note: string } | null>(null);
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 顶部提示：录音接口暂时空着，点了给一句人话。 */
   const [notice, setNotice] = useState("");
@@ -355,8 +357,54 @@ export function MeetingView({
     setInputMode("minutes");
   }, []);
 
-  const audioUnsupported = useCallback(() => {
-    setNotice("暂时不支持录音上传功能，请改用「粘贴会议纪要」。");
+  const pickAudio = useCallback(() => {
+    audioInputRef.current?.click();
+  }, []);
+
+  /** 选好音频：上传 → 后台转写 → 轮询 → 自动填进纪要框。 */
+  const uploadAudio = useCallback(async (file: File) => {
+    setAudioJob({ progress: 1, note: "上传中" });
+    setError("");
+    try {
+      const response = await fetch("/api/meeting/transcribe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "x-filename": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(payload?.error?.message ?? `上传失败（HTTP ${response.status}）`);
+      }
+      const { jobId } = (await response.json()) as { jobId: string };
+      for (let attempt = 0; attempt < 900; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        const statusResponse = await fetch(`/api/meeting/transcribe/${jobId}`);
+        if (!statusResponse.ok) throw new Error(`查询进度失败（HTTP ${statusResponse.status}）`);
+        const job = (await statusResponse.json()) as {
+          status: "running" | "done" | "error";
+          progress: number;
+          note: string;
+          text?: string;
+        };
+        setAudioJob({ progress: job.progress, note: job.note });
+        if (job.status === "done") {
+          setMinutesText(job.text ?? "");
+          setInputMode("minutes");
+          setMinutesOpen(true);
+          setNotice("转写完成，已填入纪要，检查后点「开始处理」。");
+          setAudioJob(null);
+          return;
+        }
+        if (job.status === "error") throw new Error(job.note);
+      }
+      throw new Error("等待转写结果超时，请稍后重试。");
+    } catch (caught) {
+      setAudioJob(null);
+      setError(errorMessage(caught));
+    }
   }, []);
 
   const openLlmSettings = useCallback(async () => {
@@ -542,12 +590,33 @@ export function MeetingView({
             );
           })}
         </div>
+        <input
+          ref={audioInputRef}
+          type="file"
+          accept=".mp3,.m4a,.wav,.aac,.ogg,.opus,audio/*"
+          style={{ display: "none" }}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file !== undefined) void uploadAudio(file);
+            event.target.value = "";
+          }}
+        />
+        {audioJob !== null ? (
+          <div className="meeting-warnings">
+            <p>
+              <LoaderCircle className="spin" size={14} />
+              <span>
+                录音转写中 {audioJob.progress}% · {audioJob.note}
+              </span>
+            </p>
+          </div>
+        ) : null}
         <div className="meeting-actions">
           <button
             className="primary-button"
             type="button"
             disabled={phase === "transcribing" || phase === "running"}
-            onClick={audioUnsupported}
+            onClick={pickAudio}
           >
             {phase === "transcribing" || phase === "running" ? (
               <LoaderCircle className="spin" size={16} />
@@ -600,7 +669,7 @@ export function MeetingView({
               className="secondary-button"
               type="button"
               title="录音接口暂时空着"
-              onClick={audioUnsupported}
+              onClick={pickAudio}
             >
               <Mic size={14} /> 换一段录音
             </button>
@@ -729,7 +798,7 @@ export function MeetingView({
               <button className="primary-button" type="button" onClick={() => void startFromMinutesPrompt()}>
                 <FileText size={16} /> 粘贴会议纪要
               </button>
-              <button className="secondary-button" type="button" onClick={audioUnsupported}>
+              <button className="secondary-button" type="button" onClick={pickAudio}>
                 <Upload size={16} /> 上传会议录音
               </button>
               {!online ? <p className="meeting-hint">当前离线：上传后只做本地演示。</p> : null}
