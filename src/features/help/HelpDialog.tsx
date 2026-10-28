@@ -4,6 +4,7 @@ import {
   CalendarClock,
   KeyRound,
   ListChecks,
+  Mic,
   Network,
   ShieldCheck,
   UserRound,
@@ -17,6 +18,7 @@ type SectionId =
   | "names"
   | "minutes"
   | "key"
+  | "voice"
   | "availability"
   | "network"
   | "data"
@@ -31,6 +33,7 @@ const SECTIONS: Array<{
   { id: "names", title: "用户名与显示名称", icon: UserRound },
   { id: "minutes", title: "会议纪要怎么写", icon: BookOpen },
   { id: "key", title: "配置大模型 Key", icon: KeyRound },
+  { id: "voice", title: "录音转写（思必驰）", icon: Mic },
   { id: "availability", title: "可用时间与容量", icon: CalendarClock },
   { id: "network", title: "手机与局域网访问", icon: Wifi },
   { id: "data", title: "数据、备份与卸载", icon: ShieldCheck },
@@ -182,6 +185,39 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
               </table>
               <p className="help-note">
                 Key 只保存在本机数据库里，每台安装各自独立；换电脑或重装后需要重新填一次。
+              </p>
+            </section>
+          ) : null}
+
+          {active === "voice" ? (
+            <section>
+              <h3>录音转写（思必驰）</h3>
+              <p>
+                会议页的「上传会议录音」会把音频送到思必驰的「录音文件长语音转写」服务，
+                自动转成文字并按说话人分段（发言人1、发言人2…），再走后面的抽任务流程。
+              </p>
+              <h4>需要准备的凭证</h4>
+              <ol className="help-steps">
+                <li><b>创建产品</b><p>DUI 控制台 → 基础技术 → 创建产品，勾选「录音文件长语音转写」。</p></li>
+                <li><b>领额度</b><p>购买 24 小时体验包（约 10 元）或正式套餐；没有额度会报「额度不足」。</p></li>
+                <li><b>申请 APIKEY</b><p>授权管理 → 接入 API → 申请 APIKEY，IP 白名单可填 <code>0.0.0.0/0</code>。</p></li>
+                <li><b>填进应用</b><p>会议页「手动 → AI 设置」底部「语音转写（思必驰）」填 productId + apiKey。</p></li>
+              </ol>
+              <h4>支持的音频</h4>
+              <p>mp3 / wav / m4a / aac / ogg，单个文件 5 小时以内、500MB 以内；转写按时长扣额度。</p>
+              <h4>常见报错</h4>
+              <table className="help-table">
+                <thead><tr><th>提示</th><th>原因</th></tr></thead>
+                <tbody>
+                  <tr><td>额度不足</td><td>产品没有套餐，或免费/体验额度已用完</td></tr>
+                  <tr><td>鉴权失败（120000）</td><td>productId/apiKey 不对，或当前公网 IP 不在白名单</td></tr>
+                  <tr><td>不支持的音频格式</td><td>用 mp3/wav/m4a 再试；浏览器录音的 webm 暂不支持</td></tr>
+                  <tr><td>转写结果为空</td><td>音频里没有可识别的人声</td></tr>
+                </tbody>
+              </table>
+              <p className="help-note">
+                IP 白名单绑定调用方公网 IP：换网络（比如去比赛场地）后，要回控制台把新 IP 加进去，
+                或者直接填 0.0.0.0/0 不做限制。
               </p>
             </section>
           ) : null}

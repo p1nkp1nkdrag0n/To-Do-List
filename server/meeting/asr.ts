@@ -66,21 +66,40 @@ function withQuery(path: string, config: AsrConfig): string {
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   const text = await response.text();
-  if (response.status === 401 || response.status === 403) {
-    throw new AsrError(
-      "思必驰鉴权失败：检查 productId / apiKey，以及当前公网 IP 是否在控制台的 IP 白名单里。",
-      response.status,
-    );
-  }
-  let payload: Record<string, unknown>;
+  let payload: Record<string, unknown> = {};
   try {
     payload = JSON.parse(text) as Record<string, unknown>;
   } catch {
+    if (!response.ok) {
+      throw new AsrError(`思必驰返回 HTTP ${response.status}：${text.slice(0, 160)}`, response.status);
+    }
     throw new AsrError(`思必驰返回了非 JSON 内容（HTTP ${response.status}）：${text.slice(0, 160)}`, response.status);
   }
+
+  // 思必驰的错误有两种格式：errId/errMsg（鉴权、额度、流控）和 errno/error（业务错误）。
+  const errId = payload.errId === undefined ? "" : String(payload.errId);
+  if (errId !== "") {
+    if (errId === "120100") {
+      throw new AsrError(
+        "思必驰额度不足：这个产品还没有可用的套餐。到控制台「服务开通与购买 → 购买套餐」领取免费套餐（24 小时）或购买后再试。",
+        response.status,
+      );
+    }
+    if (errId === "120200") {
+      throw new AsrError("思必驰触发流控（同时转写任务太多），等几分钟再试。", response.status);
+    }
+    throw new AsrError(
+      `思必驰鉴权失败（${errId} ${String(payload.errMsg ?? "")}）：检查 productId / apiKey，以及当前公网 IP 是否在控制台的 IP 白名单里。`,
+      response.status,
+    );
+  }
+
   const errno = Number(payload.errno ?? 0);
   if (errno !== 0) {
     throw new AsrError(`思必驰返回错误 ${errno}：${String(payload.error ?? "未知错误")}`, response.status);
+  }
+  if (!response.ok) {
+    throw new AsrError(`思必驰返回 HTTP ${response.status}：${text.slice(0, 160)}`, response.status);
   }
   return payload;
 }
