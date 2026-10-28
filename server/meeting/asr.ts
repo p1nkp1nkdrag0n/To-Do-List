@@ -273,16 +273,16 @@ export async function transcribeAudio(options: TranscribeOptions): Promise<Trans
   if (options.audio.byteLength === 0) throw new AsrError("音频文件是空的。");
 
   const sliceCount = Math.max(1, Math.ceil(options.audio.byteLength / SLICE_BYTES));
-  report(2, `上传音频（${sliceCount} 片）`);
+  report(2, `上传音频（共 ${sliceCount} 片）`);
   const audioId = await createAudio(options.config, { audioType, sliceCount }, fetchImpl);
 
   for (let index = 0; index < sliceCount; index += 1) {
     const chunk = options.audio.subarray(index * SLICE_BYTES, (index + 1) * SLICE_BYTES);
     await uploadSlice(options.config, audioId, index, chunk, fetchImpl);
-    report(2 + Math.round(((index + 1) / sliceCount) * 30), `上传音频 ${index + 1}/${sliceCount}`);
+    report(2 + Math.round(((index + 1) / sliceCount) * 30), `上传第 ${index + 1}/${sliceCount} 片`);
   }
 
-  report(35, "创建转写任务");
+  report(35, "已上传，等待服务端排队");
   const taskId = await createTask(
     options.config,
     { audioId, audioType, hotwords: options.hotwords },
@@ -293,13 +293,13 @@ export async function transcribeAudio(options: TranscribeOptions): Promise<Trans
   let progress = 0;
   while (Date.now() < deadline) {
     progress = await taskProgress(options.config, taskId, fetchImpl);
-    report(35 + Math.round(progress * 0.6), `转写中 ${progress}%`);
+    report(35 + Math.round(progress * 0.6), `服务端进度 ${progress}%`);
     if (progress >= 100) break;
     await sleep(3_000);
   }
   if (progress < 100) throw new AsrError("转写超时，请稍后在思必驰控制台查看任务结果。");
 
-  report(98, "获取转写结果");
+  report(98, "服务端完成，正在取回结果");
   const transcript = await taskResult(options.config, taskId, fetchImpl);
   if (transcript.segments.length === 0) throw new AsrError("转写结果为空，可能是音频里没有可识别的人声。");
   report(100, "转写完成");
