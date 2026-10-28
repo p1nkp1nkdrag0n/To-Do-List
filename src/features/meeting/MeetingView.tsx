@@ -169,6 +169,59 @@ export function MeetingView({
     }
   }, [currentUserId, projectId]);
 
+  // 刷新页面后恢复正在进行的转写（服务端任务还在跑）。
+  useEffect(() => {
+    let cancelled = false;
+    let jobId = "";
+    try {
+      jobId = sessionStorage.getItem("meeting.asrJob") ?? "";
+    } catch {
+      return;
+    }
+    if (jobId === "") return;
+    setAudioJob({ progress: 1, note: "恢复上次转写" });
+    const run = async () => {
+      for (let attempt = 0; attempt < 1800; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        if (cancelled) return;
+        try {
+          const response = await fetch(`/api/meeting/transcribe/${jobId}`);
+          if (!response.ok) break;
+          const job = (await response.json()) as {
+            status: "running" | "done" | "error";
+            progress: number;
+            note: string;
+            text?: string;
+          };
+          setAudioJob({ progress: job.progress, note: job.note });
+          if (job.status === "done") {
+            setMinutesText(job.text ?? "");
+            setInputMode("minutes");
+            setMinutesOpen(true);
+            setNotice("上次的转写完成了，已填入纪要。");
+            break;
+          }
+          if (job.status === "error") {
+            setError(job.note);
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+      setAudioJob(null);
+      try {
+        sessionStorage.removeItem("meeting.asrJob");
+      } catch {
+        // 忽略。
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const persistRun = useCallback(
     (result: RunResponse) => {
       try {
@@ -391,7 +444,12 @@ export function MeetingView({
         throw new Error(payload?.error?.message ?? `上传失败（HTTP ${response.status}）`);
       }
       const { jobId } = (await response.json()) as { jobId: string };
-      for (let attempt = 0; attempt < 900; attempt += 1) {
+      try {
+        sessionStorage.setItem("meeting.asrJob", jobId);
+      } catch {
+        // 隐私模式存不进去也不影响。
+      }
+      for (let attempt = 0; attempt < 1800; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2_000));
         const statusResponse = await fetch(`/api/meeting/transcribe/${jobId}`);
         if (!statusResponse.ok) throw new Error(`查询进度失败（HTTP ${statusResponse.status}）`);
@@ -408,6 +466,11 @@ export function MeetingView({
           setMinutesOpen(true);
           setNotice("转写完成，已填入纪要，检查后点「开始处理」。");
           setAudioJob(null);
+          try {
+            sessionStorage.removeItem("meeting.asrJob");
+          } catch {
+            // 忽略。
+          }
           return;
         }
         if (job.status === "error") throw new Error(job.note);
@@ -750,7 +813,15 @@ export function MeetingView({
                 accept=".mp3,.m4a,.wav,.aac,.ogg,.opus,audio/*"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file !== undefined) setAudioFile(file);
+                  if (file !== undefined) {
+                    if (file.size > 200 * 1024 * 1024) {
+                      setAudioHint("文件超过 200MB，请先压缩或剪成两段再上传。");
+                      event.target.value = "";
+                      return;
+                    }
+                    setAudioFile(file);
+                    setAudioHint("");
+                  }
                   event.target.value = "";
                 }}
               />

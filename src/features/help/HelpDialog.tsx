@@ -203,6 +203,16 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
                 <li><b>申请 APIKEY</b><p>授权管理 → 接入 API → 申请 APIKEY，IP 白名单可填 <code>0.0.0.0/0</code>。</p></li>
                 <li><b>填进应用</b><p>会议页「手动 → AI 设置」底部「语音转写（思必驰）」填 productId + apiKey。</p></li>
               </ol>
+              <h4>不想每人注册思必驰？</h4>
+              <p>
+                配好的人可以在「AI 设置 → 语音转写 → 自己填写」里点「复制分享配置」，
+                把一串 <code>asr://...</code> 发给队友；队友在「导入团队配置」里粘贴即可，
+                不用注册、不用实名、不用买套餐。
+              </p>
+              <p className="help-note">
+                这串里包含明文 Key。建议在控制台单独建一把「队友临时」Key，
+                IP 白名单填比赛场地，赛后删掉；不要用长期在用的那把。
+              </p>
               <h4>支持的音频</h4>
               <p>mp3 / wav / m4a / aac / ogg，单个文件 5 小时以内、500MB 以内；转写按时长扣额度。</p>
               <h4>常见报错</h4>

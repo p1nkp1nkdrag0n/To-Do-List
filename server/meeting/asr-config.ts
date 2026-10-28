@@ -12,10 +12,19 @@ import path from "node:path";
 
 import { z } from "zod";
 
-const CONFIG_DIR = path.join(process.cwd(), "data", "v2", "asr");
+import { dataRoot, migrateFile, readWithLegacy } from "../config/config-root.js";
+
+function configDir(): string {
+  return path.join(dataRoot(), "asr");
+}
 
 function configPath(userId: string): string {
-  return path.join(CONFIG_DIR, `${userId}.json`);
+  return path.join(configDir(), `${userId}.json`);
+}
+
+/** 旧位置：程序目录下的 data/v2/asr（更新 exe 会丢）。 */
+function legacyPath(userId: string): string {
+  return path.join(process.cwd(), "data", "v2", "asr", `${userId}.json`);
 }
 
 export const AsrConfigSchema = z
@@ -35,8 +44,9 @@ export interface AsrConfigView {
 }
 
 export function readAsrConfig(userId: string): AsrConfig | null {
+  const raw = readWithLegacy(configPath(userId), legacyPath(userId));
+  if (raw === null) return null;
   try {
-    const raw = fs.readFileSync(configPath(userId), "utf8");
     const parsed = AsrConfigSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : null;
   } catch {
@@ -45,7 +55,8 @@ export function readAsrConfig(userId: string): AsrConfig | null {
 }
 
 export function writeAsrConfig(userId: string, config: AsrConfig): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(configDir(), { recursive: true });
+  migrateFile(legacyPath(userId), configPath(userId));
   fs.writeFileSync(configPath(userId), JSON.stringify(config, null, 2), "utf8");
 }
 

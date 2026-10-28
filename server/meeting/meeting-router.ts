@@ -27,7 +27,7 @@ import { asyncRoute } from "../http/routing.js";
 
 import { MeetingControl } from "./control.js";
 import { asrConfigView, readAsrConfig, writeAsrConfig, AsrConfigSchema } from "./asr-config.js";
-import { AsrError, audioFormatFor, transcribeAudio } from "./asr.js";
+import { AsrError, audioFormatFor, createAudio, transcribeAudio } from "./asr.js";
 import { correctTranscript } from "./asr-correct.js";
 import { chatJson } from "./llm.js";
 import {
@@ -234,6 +234,15 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     response.json(asrConfigView(readAsrConfig(response.locals.auth.user.id)));
   });
 
+  /** 导出给别人用的分享串（仅导出自己的配置）。 */
+  router.get("/asr-config/export", (_request, response) => {
+    const config = readAsrConfig(response.locals.auth.user.id);
+    if (config === null) {
+      throw new HttpError(409, "ASR_NOT_CONFIGURED", "还没有可分享的思必驰配置。");
+    }
+    response.json({ share: `asr://${config.productId}:${config.apiKey}` });
+  });
+
   router.put("/asr-config", (request, response) => {
     const input = parseRequestBody(
       z
@@ -253,6 +262,24 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     writeAsrConfig(userId, AsrConfigSchema.parse({ version: 1, productId: input.productId, apiKey }));
     response.json(asrConfigView(readAsrConfig(userId)));
   });
+
+  /** 测试凭证：只创建音频（不建任务、不计费），能验证 Key 和 IP 白名单。 */
+  router.post("/asr-config/test", asyncRoute(async (_request, response) => {
+    const config = readAsrConfig(response.locals.auth.user.id);
+    if (config === null) {
+      throw new HttpError(409, "ASR_NOT_CONFIGURED", "还没有配置思必驰的 productId / apiKey。");
+    }
+    try {
+      await createAudio(config, { audioType: "mp3", sliceCount: 1 });
+      response.json({
+        ok: true,
+        note: "鉴权通过。额度是否充足要等真正转写时才知道。",
+      });
+    } catch (error) {
+      const message = error instanceof AsrError ? error.message : error instanceof Error ? error.message : String(error);
+      throw new HttpError(400, "ASR_TEST_FAILED", message);
+    }
+  }));
 
   /** 上传音频，后台转写；前端轮询下面的状态接口。 */
   router.post(

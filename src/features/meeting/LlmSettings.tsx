@@ -39,6 +39,10 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   const [asrProductId, setAsrProductId] = useState("");
   const [asrKey, setAsrKey] = useState("");
   const [asrMessage, setAsrMessage] = useState("");
+  const [asrTab, setAsrTab] = useState<"import" | "manual">("import");
+  const [importText, setImportText] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [shareText, setShareText] = useState("");
   const [modelOptions, setModelOptions] = useState<
     Record<string, Array<{ id: string; name: string }>>
   >({});
@@ -195,6 +199,54 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
 
   if (!open) return null;
 
+  const copyShare = async () => {
+    try {
+      const result = await api.get<{ share: string }>("/api/meeting/asr-config/export");
+      try {
+        await navigator.clipboard.writeText(result.share);
+        setShareText("");
+        setAsrMessage("已复制分享配置，发给队友即可（含 Key，注意别外传）。");
+      } catch {
+        // 192.168 这类非安全地址浏览器不允许写剪贴板，退化成手动复制。
+        setShareText(result.share);
+        setAsrMessage("浏览器不允许自动复制，请在下面文本框里按 Ctrl+C。");
+      }
+    } catch (caught) {
+      setAsrMessage(errorMessage(caught));
+    }
+  };
+
+  const showQr = async () => {
+    try {
+      const result = await api.get<{ share: string }>("/api/meeting/asr-config/export");
+      const qrcode = await import("qrcode");
+      setQrDataUrl(await qrcode.toDataURL(result.share, { width: 220, margin: 1 }));
+    } catch (caught) {
+      setAsrMessage(errorMessage(caught));
+    }
+  };
+
+  const importShare = async () => {
+    const match = /^asr:\/\/([^:]+):(.+)$/.exec(importText.trim());
+    if (match === null) {
+      setAsrMessage("格式不对，应该是 asr://productId:apiKey。");
+      return;
+    }
+    setAsrMessage("导入中…");
+    try {
+      const next = await api.put<{ productId: string; keyHint: string; hasKey: boolean }>(
+        "/api/meeting/asr-config",
+        { productId: match[1], apiKey: match[2] },
+      );
+      setAsr(next);
+      setAsrProductId(next.productId);
+      setImportText("");
+      setAsrMessage(`已导入 productId ${next.productId}，Key ${next.keyHint}。`);
+    } catch (caught) {
+      setAsrMessage(errorMessage(caught));
+    }
+  };
+
   const saveAsr = async () => {
     if (asrProductId.trim() === "") {
       setAsrMessage("请先填 productId（DUI 控制台创建产品后生成）。");
@@ -313,33 +365,115 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
 
               <div className="llm-asr">
                 <strong>语音转写（思必驰）</strong>
-                <p>
-                  上传会议录音自动转成纪要需要这组凭证：DUI 控制台 → 基础技术 → 创建产品 → 开通「录音文件长语音转写」
-                  → 服务授权填 IP 白名单 → 生成 apiKey。
-                </p>
-                <label>
-                  productId
-                  <input
-                    value={asrProductId}
-                    onChange={(event) => setAsrProductId(event.target.value)}
-                    placeholder="例如 278578090"
-                  />
-                </label>
-                <label>
-                  apiKey
-                  <input
-                    type="password"
-                    value={asrKey}
-                    onChange={(event) => setAsrKey(event.target.value)}
-                    placeholder={asr?.hasKey === true ? `已保存 ${asr.keyHint}，留空则不修改` : "粘贴 apiKey"}
-                  />
-                </label>
-                <div className="llm-asr-actions">
-                  <button className="primary-button" type="button" onClick={() => void saveAsr()}>
-                    保存
+                <div className="llm-asr-tabs">
+                  <button
+                    type="button"
+                    className={asrTab === "import" ? "on" : ""}
+                    onClick={() => setAsrTab("import")}
+                  >
+                    导入团队配置
                   </button>
-                  <span>{asrMessage !== "" ? asrMessage : asr?.hasKey === true ? "已配置" : "未配置"}</span>
+                  <button
+                    type="button"
+                    className={asrTab === "manual" ? "on" : ""}
+                    onClick={() => setAsrTab("manual")}
+                  >
+                    自己填写
+                  </button>
                 </div>
+
+                {asrTab === "import" ? (
+                  <>
+                    <label>
+                      粘贴队长发来的配置
+                      <textarea
+                        rows={3}
+                        value={importText}
+                        onChange={(event) => setImportText(event.target.value)}
+                        placeholder="asr://279636026:60dec0ce..."
+                      />
+                    </label>
+                    <div className="llm-asr-actions">
+                      <button className="primary-button" type="button" onClick={() => void importShare()}>
+                        导入
+                      </button>
+                      <button
+                        className="link-button"
+                        type="button"
+                        onClick={() => void navigator.clipboard.readText().then(setImportText).catch(() => setAsrMessage("读不到剪贴板，请手动粘贴。"))}
+                      >
+                        从剪贴板读取
+                      </button>
+                      <span>{asrMessage !== "" ? asrMessage : asr?.hasKey === true ? `已配置 ${asr.keyHint}` : "未配置"}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      DUI 控制台 → 基础技术 → 创建产品 → 开通「录音文件长语音转写」 → 服务授权填 IP 白名单 → 生成 apiKey。
+                    </p>
+                    <label>
+                      productId
+                      <input
+                        value={asrProductId}
+                        onChange={(event) => setAsrProductId(event.target.value)}
+                        placeholder="例如 278578090"
+                      />
+                    </label>
+                    <label>
+                      apiKey
+                      <input
+                        type="password"
+                        value={asrKey}
+                        onChange={(event) => setAsrKey(event.target.value)}
+                        placeholder={asr?.hasKey === true ? `已保存 ${asr.keyHint}，留空则不修改` : "粘贴 apiKey"}
+                      />
+                    </label>
+                    <div className="llm-asr-actions">
+                      <button className="primary-button" type="button" onClick={() => void saveAsr()}>
+                        保存
+                      </button>
+                      {asr?.hasKey === true ? (
+                        <>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => {
+                              setAsrMessage("测试中…");
+                              void api
+                                .post<{ ok: boolean; note: string }>("/api/meeting/asr-config/test")
+                                .then((result) => setAsrMessage(result.note))
+                                .catch((caught) => setAsrMessage(errorMessage(caught)));
+                            }}
+                          >
+                            测试连接
+                          </button>
+                          <button className="secondary-button" type="button" onClick={() => void copyShare()}>
+                            复制分享配置
+                          </button>
+                          <button className="secondary-button" type="button" onClick={() => void showQr()}>
+                            二维码
+                          </button>
+                        </>
+                      ) : null}
+                      <span>{asrMessage !== "" ? asrMessage : asr?.hasKey === true ? "已配置" : "未配置"}</span>
+                    </div>
+                    {shareText !== "" ? (
+                      <textarea
+                        readOnly
+                        value={shareText}
+                        onFocus={(event) => event.currentTarget.select()}
+                        onClick={(event) => event.currentTarget.select()}
+                      />
+                    ) : null}
+                    {qrDataUrl !== "" ? (
+                      <div className="llm-asr-qr">
+                        <img src={qrDataUrl} alt="分享配置二维码" />
+                        <span>同一串内容，扫描后复制到队友的应用里</span>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
 
               {view?.envAvailable === true ? (

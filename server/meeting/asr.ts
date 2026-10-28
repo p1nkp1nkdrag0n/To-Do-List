@@ -289,7 +289,7 @@ export async function transcribeAudio(options: TranscribeOptions): Promise<Trans
     fetchImpl,
   );
 
-  const deadline = Date.now() + (options.timeoutMs ?? 20 * 60 * 1000);
+  const deadline = Date.now() + (options.timeoutMs ?? 60 * 60 * 1000);
   let progress = 0;
   while (Date.now() < deadline) {
     progress = await taskProgress(options.config, taskId, fetchImpl);

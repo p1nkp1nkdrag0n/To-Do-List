@@ -14,12 +14,21 @@ import path from "node:path";
 
 import { z } from "zod";
 
-const CONFIG_DIR = path.join(process.cwd(), "data", "v2", "llm");
+import { dataRoot, migrateFile, readWithLegacy } from "../config/config-root.js";
+
+function configDir(): string {
+  return path.join(dataRoot(), "llm");
+}
 /** 老版本的单文件配置，第一次读时迁移给它的主人。 */
 const LEGACY_PATH = path.join(process.cwd(), "data", "v2", "llm-config.json");
 
 function configPath(userId: string): string {
-  return path.join(CONFIG_DIR, `${userId}.json`);
+  return path.join(configDir(), `${userId}.json`);
+}
+
+/** 旧位置：程序目录下的 data/v2/llm。 */
+function legacyPath(userId: string): string {
+  return path.join(process.cwd(), "data", "v2", "llm", `${userId}.json`);
 }
 
 export const ProviderSchema = z
@@ -77,12 +86,8 @@ function emptyConfig(): LlmConfigFile {
 }
 
 export function readConfig(userId: string): LlmConfigFile {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(configPath(userId), "utf8");
-  } catch {
-    return emptyConfig();
-  }
+  const raw = readWithLegacy(configPath(userId), legacyPath(userId));
+  if (raw === null) return emptyConfig();
 
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -114,7 +119,8 @@ export function readConfig(userId: string): LlmConfigFile {
 }
 
 export function writeConfig(userId: string, config: LlmConfigFile): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(configDir(), { recursive: true });
+  migrateFile(legacyPath(userId), configPath(userId));
   fs.writeFileSync(configPath(userId), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
