@@ -104,6 +104,15 @@ export function useProductTour({
     setActive({ section, stepIndex: 0, manual });
   }, []);
 
+  // 被邀请的成员本来没有项目，引导可能先停在「创建项目」；
+  // 加入项目后要结束这一段，否则工作区引导永远不开始。
+  useEffect(() => {
+    if (hasProject && active?.section === "project-setup") {
+      persistCompletion("project-setup");
+      setActive(undefined);
+    }
+  }, [active?.section, hasProject, persistCompletion]);
+
   useEffect(() => {
     if (
       !enabled
