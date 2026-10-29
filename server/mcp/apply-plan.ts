@@ -9,8 +9,9 @@
  * 冲突才会把错误抛回去。
  */
 import { HttpError } from "../http/errors.js";
-import type { ReschedulePlan, PlanOperation } from "./reschedule.js";
+import { snapshotSignature, type ReschedulePlan, type PlanOperation } from "./reschedule.js";
 import type { McpRuntime } from "./runtime.js";
+import { loadSchedule } from "./snapshot.js";
 
 const MAX_ATTEMPTS = 3;
 
@@ -56,7 +57,19 @@ export function applyPlan(
       `排期在试算之后被改动过（冲突 ${plan.before.conflicts} → ${currentConflicts.length}），请重新 plan_reschedule。`,
     );
   }
+  // 只比冲突数不够：把工时 600 改成 300，冲突数可能不变，但计划已经过期。
+  const { snapshot: currentSnapshot } = loadSchedule(runtime, projectId);
+  if (
+    plan.beforeSignature !== undefined &&
+    plan.beforeSignature !== "" &&
+    plan.beforeSignature !== snapshotSignature(currentSnapshot)
+  ) {
+    throw new Error(
+      "排期在试算之后被改动过（任务或分工的版本已变化），请重新 plan_reschedule。",
+    );
+  }
 
+  backupSchedule(runtime, projectId);
   const applied: string[] = [];
   const createdParticipants: ApplyResult["createdParticipants"] = [];
   // 方案里的「拆分」会给新分工起一个占位 id，后续动作可能又要对它再拆一次。
@@ -81,17 +94,18 @@ export function applyPlan(
         });
       }
     } catch (error) {
-      // 防呆二：这一步不是原子的，失败时必须告诉调用方「改到哪一步了」，
-      // 而不是让人以为什么都没发生。
+      // 失败就整体回滚到应用前的快照：不能把项目留在“改了一半”的状态。
       const message = error instanceof Error ? error.message : String(error);
+      restoreSchedule(runtime, projectId);
       throw new Error(
         `已应用 ${applied.length}/${plan.operations.length} 个动作后失败：${message}。` +
-          `数据库可能处于改了一半的状态，建议重新 plan_reschedule，必要时用快照还原。`,
+          `本次改动已全部回滚，请重新 plan_reschedule。`,
       );
     }
     applied.push(operation.kind);
   }
 
+  dropBackup(runtime);
   const conflictsAfter = runtime.availability.projectConflicts(projectId);
   return {
     projectId,
@@ -226,4 +240,54 @@ function applyOperation(
       return undefined;
     }
   }
+}
+
+/** 应用前的项目快照：失败时按行还原，避免项目停在「改了一半」。 */
+function backupSchedule(runtime: McpRuntime, projectId: string): void {
+  const db = runtime.database;
+  db.exec(
+    "DROP TABLE IF EXISTS temp.bk_tasks; DROP TABLE IF EXISTS temp.bk_participants; DROP TABLE IF EXISTS temp.bk_dependencies;",
+  );
+  db.prepare("CREATE TEMP TABLE bk_tasks AS SELECT * FROM tasks WHERE project_id = ?").run(projectId);
+  db.prepare(
+    "CREATE TEMP TABLE bk_participants AS SELECT * FROM task_participants WHERE project_id = ?",
+  ).run(projectId);
+  db.prepare(
+    "CREATE TEMP TABLE bk_dependencies AS SELECT * FROM task_dependencies WHERE project_id = ?",
+  ).run(projectId);
+}
+
+function dropBackup(runtime: McpRuntime): void {
+  runtime.database.exec(
+    "DROP TABLE IF EXISTS temp.bk_tasks; DROP TABLE IF EXISTS temp.bk_participants; DROP TABLE IF EXISTS temp.bk_dependencies;",
+  );
+}
+
+function restoreSchedule(runtime: McpRuntime, projectId: string): void {
+  const db = runtime.database;
+  const tables: Array<[string, string]> = [
+    ["tasks", "bk_tasks"],
+    ["task_participants", "bk_participants"],
+    ["task_dependencies", "bk_dependencies"],
+  ];
+  db.transaction(() => {
+    for (const [table, backup] of tables) {
+      const columns = (
+        db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+      ).map((column) => column.name);
+      // 先删掉这次新插入的行，再把备份里的行更新/补回。
+      db.prepare(
+        `DELETE FROM ${table} WHERE project_id = ? AND id NOT IN (SELECT id FROM ${backup})`,
+      ).run(projectId);
+      const updates = columns.filter((column) => column !== "id");
+      const sql =
+        `INSERT INTO ${table} (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")}) ` +
+        `ON CONFLICT(id) DO UPDATE SET ${updates.map((column) => `${column}=excluded.${column}`).join(",")}`;
+      const statement = db.prepare(sql);
+      for (const row of db.prepare(`SELECT * FROM ${backup}`).all() as Array<Record<string, unknown>>) {
+        statement.run(...columns.map((column) => row[column] as never));
+      }
+    }
+  });
+  dropBackup(runtime);
 }

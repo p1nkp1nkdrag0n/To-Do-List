@@ -150,13 +150,14 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       }
       const control = new MeetingControl();
       controls.set(projectId, control);
-      const orchestrator = new MeetingOrchestrator({
+      const orchestratorOptions: ConstructorParameters<typeof MeetingOrchestrator>[0] = {
         projectId,
         control,
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
         paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),
         lockOwners: lockOwners ?? false,
         actingUserId: auth.user.id,
+        actingUserName: auth.user.username,
         onEvent(event) {
           dependencies.publishMeetingEvent?.(projectId, {
             type: event.type,
@@ -178,21 +179,22 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
           dependencies.publishEntityInvalidation?.(changedProjectId, "project", changedProjectId);
           dependencies.publishEntityInvalidation?.(changedProjectId, "task", changedProjectId);
         },
-      });
+      };
+      const orchestrator = new MeetingOrchestrator(orchestratorOptions);
 
       const trimmed = minutes?.trim() ?? "";
       let clearedTasks = 0;
-      if (trimmed !== "" && replaceSchedule === true) {
-        // 从纪要建排期＝重建，不是往旧排期上叠加。
-        clearedTasks = clearProjectSchedule(dependencies, projectId).removedTasks;
-        dependencies.publishMeetingEvent?.(projectId, {
-          type: "session.started",
-          at: new Date().toISOString(),
-          message:
-            clearedTasks > 0
-              ? `已清空原有排期（${clearedTasks} 个任务），按纪要重建`
-              : "当前排期为空，按纪要新建",
-        });
+      // 「按纪要重建」的清理交给编排器：只有纪要解析成功、任务即将创建时才删旧排期。
+      // 解析失败会直接抛错，旧排期原样保留。
+      const clearOnSuccess =
+        trimmed !== "" && replaceSchedule === true
+          ? () => {
+              clearedTasks = clearProjectSchedule(dependencies, projectId).removedTasks;
+              return clearedTasks;
+            }
+          : undefined;
+      if (clearOnSuccess !== undefined) {
+        orchestratorOptions.beforeCreateTasks = clearOnSuccess;
       }
       let result;
       try {

@@ -119,7 +119,8 @@ export function undoPlan(
           if (task === undefined || task.dueDate !== operation.newEndDate) return;
           return schedule.updateTask(auth, projectId, task.id, {
             expectedRevision: task.revision,
-            dueDate: operation.previousEndDate,
+            // 旧记录没有 previousTaskDueDate 时退回分工结束日，保持兼容。
+            dueDate: operation.previousTaskDueDate ?? operation.previousEndDate,
           });
         });
         return;

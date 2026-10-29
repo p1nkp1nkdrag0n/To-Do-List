@@ -61,6 +61,8 @@ export type PlanOperation =
       taskId: string;
       newEndDate: string;
       previousEndDate: string;
+      /** 任务自己的截止日；撤销时要还原它，而不是分工的结束日。 */
+      previousTaskDueDate?: string | null;
     }
   | {
       kind: "shiftTask";
@@ -82,6 +84,8 @@ export interface PlanScore {
 
 export interface ReschedulePlan {
   id: string;
+  /** 试算时排期的指纹；应用前必须一致，否则说明期间有人改过。 */
+  beforeSignature: string;
   label: string;
   operations: PlanOperation[];
   before: PlanScore;
@@ -357,6 +361,7 @@ function candidatesFor(
         taskId: participant.taskId,
         newEndDate: newEnd,
         previousEndDate: participant.endDate,
+        previousTaskDueDate: taskOf(snapshot, participant.taskId)?.dueDate ?? null,
       });
     }
     return operations;
@@ -448,7 +453,7 @@ function signature(operations: PlanOperation[]): string {
     .join("|");
 }
 
-function snapshotSignature(snapshot: ScheduleSnapshot): string {
+export function snapshotSignature(snapshot: ScheduleSnapshot): string {
   const tasks = snapshot.tasks
     .map((task) => `${task.id}:${task.startDate}:${task.dueDate}`)
     .sort()
@@ -621,6 +626,7 @@ export function planReschedules(
     const conflictsAfter = conflictList(node.snapshot, context.today);
     return {
       id: `plan-${index + 1}`,
+      beforeSignature: snapshotSignature(snapshot),
       label: planLabel(node.operations),
       operations: node.operations,
       before,

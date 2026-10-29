@@ -20,9 +20,10 @@ export function isSourceFile(file) {
   if (file.includes("\\") || file.split("/").some((part) => part === "..")) return false;
   if (rootFiles.has(file)) return true;
   if (/^deploy\/(Caddyfile\.example|team-project-manager-v2\.env\.example|team-project-manager\.service)$/.test(file)) return true;
-  return /^(src|server|shared|scripts|tests|licenses)\//.test(file)
+  return /^(src|server|shared|scripts|tests|licenses|packaging)\//.test(file)
     && !/(^|\/)(\.|node_modules\/|data\/)/.test(file)
-    && /\.(ts|tsx|js|mjs|css|json|md|txt)$/.test(file)
+    // packaging 里是启动器/打包脚本：C# 和 PowerShell 也要进源码包。
+    && /\.(ts|tsx|js|mjs|css|json|md|txt|cs|ps1|cmd)$/.test(file)
     && !/(secret|credential|\.env|\.sqlite|\.pem)/i.test(file);
 }
 

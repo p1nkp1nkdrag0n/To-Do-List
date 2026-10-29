@@ -115,6 +115,11 @@ export class AuthService {
     input: BootstrapAdminRequest,
     _ipAddress: string,
   ): Promise<{ token: string; user: PublicUser; teamMember: boolean }> {
+    // 先确认实例还没初始化，再做耗时的密码哈希：
+    // 已经初始化后，这里必须立即失败，不能让请求拖着 CPU 和并发窗口。
+    if (!this.needsBootstrap()) {
+      throw new HttpError(409, "BOOTSTRAP_CLOSED", "这个系统已经初始化过了，请用邀请码注册。");
+    }
     const passwordHash = await this.dependencies.passwordHasher(input.password);
 
     return this.dependencies.database.transaction(() => {

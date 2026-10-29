@@ -266,6 +266,60 @@ describe("plan → apply 落库", () => {
     expect(backend.estimatedMinutes + qa.estimatedMinutes).toBe(600);
   });
 
+  it("动作中途失败时整体回滚，不留下改了一半的数据", () => {
+    const fixture = buildFixture();
+    const runtime = trackRuntime(
+      createMcpRuntime({ dbPath: fixture.dbPath, username: LEAD }),
+      fixture,
+    );
+
+    const { snapshot, context } = loadSchedule(runtime, fixture.projectId);
+    const plan = planReschedules(snapshot, context).find((candidate) => candidate.feasible)!;
+    const broken = {
+      ...plan,
+      operations: [
+        { ...(plan.operations[0] as { participantId: string }), participantId: "missing-participant" },
+      ],
+    } as typeof plan;
+
+    expect(() => applyPlan(runtime, fixture.projectId, broken)).toThrow(/回滚/);
+
+    const participants = runtime.schedule
+      .listParticipants(runtime.auth, fixture.projectId)
+      .filter((item) => item.taskId === fixture.taskId);
+    expect(participants).toHaveLength(1);
+    expect(participants[0]!.estimatedMinutes).toBe(600);
+  });
+
+  it("试算后有人改了工时（冲突数不变）时拒绝应用，旧数据保持不变", () => {
+    const fixture = buildFixture();
+    const runtime = trackRuntime(
+      createMcpRuntime({ dbPath: fixture.dbPath, username: LEAD }),
+      fixture,
+    );
+
+    const { snapshot, context } = loadSchedule(runtime, fixture.projectId);
+    const plan = planReschedules(snapshot, context).find((candidate) => candidate.feasible);
+    expect(plan).toBeDefined();
+    expect(typeof plan!.beforeSignature).toBe("string");
+
+    // 模拟人工把工时从 600 改成 300：冲突数仍然是 1，只能靠指纹发现。
+    const participant = runtime.schedule
+      .listParticipants(runtime.auth, fixture.projectId)
+      .find((item) => item.taskId === fixture.taskId)!;
+    runtime.schedule.updateParticipant(runtime.auth, fixture.projectId, participant.id, {
+      expectedRevision: participant.revision,
+      estimatedMinutes: 300,
+    });
+
+    expect(() => applyPlan(runtime, fixture.projectId, plan!)).toThrow(/改动过|重新 plan_reschedule/);
+
+    const after = runtime.schedule
+      .listParticipants(runtime.auth, fixture.projectId)
+      .find((item) => item.id === participant.id)!;
+    expect(after.estimatedMinutes).toBe(300);
+  });
+
   it("任务被别人改过（revision +1）时，apply 会重试而不是抛 REVISION_CONFLICT", () => {
     const fixture = buildFixture();
     const runtime = trackRuntime(

@@ -1,3 +1,5 @@
+import os from "node:os";
+
 import { Router, type NextFunction, type Request, type Response } from "express";
 
 import {
@@ -6,6 +8,7 @@ import {
   RegisterRequestSchema,
 } from "../../../shared/contracts.js";
 import { parseCookieHeader } from "../../http/cookies.js";
+import { HttpError } from "../../http/errors.js";
 import type { V2RuntimeDependencies } from "../../http/dependencies.js";
 import { asyncRoute, parseRequestBody } from "../../http/routing.js";
 import {
@@ -13,6 +16,19 @@ import {
   type AuthenticatedSession,
   sessionDurationSeconds,
 } from "./auth-service.js";
+
+/** 首次初始化只允许本机：避免局域网里有人抢先创建管理员。 */
+function isLocalRequest(request: Request): boolean {
+  const raw = request.ip ?? request.socket.remoteAddress ?? "";
+  const ip = raw.replace(/^::ffff:/, "");
+  if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true;
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.address === ip) return true;
+    }
+  }
+  return false;
+}
 
 export interface AuthLocals {
   auth: AuthenticatedSession;
@@ -52,6 +68,13 @@ export function createAuthRouter(
   router.post(
     "/bootstrap",
     asyncRoute(async (request, response) => {
+      if (!isLocalRequest(request)) {
+        throw new HttpError(
+          403,
+          "BOOTSTRAP_LOCAL_ONLY",
+          "首次初始化只能在本机完成：请在这台电脑上打开 127.0.0.1 地址后再创建管理员。",
+        );
+      }
       const result = await service.bootstrapAdmin(
         parseRequestBody(BootstrapAdminRequestSchema, request),
         request.ip ?? request.socket.remoteAddress ?? "unknown",

@@ -41,6 +41,13 @@ export interface OrchestratorOptions {
   lockOwners?: boolean;
   /** 触发这次处理的用户；决定用谁的模型 Key。 */
   actingUserId?: string;
+  /** 触发这次处理的用户名；MCP 子进程用它作为执行身份。 */
+  actingUserName?: string;
+  /**
+   * 纪要解析成功、任务即将创建之前调用（用于「按纪要重建」时清空旧排期）。
+   * 解析失败不会调用，所以坏纪要不会提前把旧排期删掉。
+   */
+  beforeCreateTasks?: () => number;
 }
 
 interface PlanSummary {
@@ -178,7 +185,11 @@ export class MeetingOrchestrator {
           ? [compiledEntry]
           : ["--import", "tsx", "server/mcp/main.ts"],
       cwd: this.options.cwd ?? process.cwd(),
-      env: childEnvironment(this.options.env),
+      env: childEnvironment(
+        this.options.actingUserName === undefined
+          ? this.options.env
+          : { ...this.options.env, MCP_USERNAME: this.options.actingUserName },
+      ),
       stderr: "pipe",
     });
     const client = new Client({ name: "meeting-orchestrator", version: "0.2.0" });
@@ -332,7 +343,27 @@ export class MeetingOrchestrator {
       { projectId, planId: chosen.id },
       (payload) => String(payload.summary ?? "已应用"),
     );
-    const conflictsAfter = Number(applyOutcome.payload.conflictsAfter ?? 0);
+    // 工具失败时 payload 里没有 conflictsAfter，不能当成 0 来宣布“清零”。
+    if (!applyOutcome.ok) {
+      this.emit({
+        type: "session.failed",
+        at: new Date().toISOString(),
+        message: `应用方案失败：${applyOutcome.summary}`,
+        detail: { planId: chosen.id, label: chosen.label },
+      });
+      throw new Error(`应用方案失败：${applyOutcome.summary}`);
+    }
+    const rawConflictsAfter = applyOutcome.payload.conflictsAfter;
+    const conflictsAfter = Number(rawConflictsAfter);
+    if (rawConflictsAfter === undefined || !Number.isFinite(conflictsAfter)) {
+      this.emit({
+        type: "session.failed",
+        at: new Date().toISOString(),
+        message: "方案已提交，但没有返回冲突结果，无法确认是否生效。",
+        detail: { planId: chosen.id, label: chosen.label },
+      });
+      throw new Error("方案已提交，但没有返回冲突结果，无法确认是否生效；请刷新甘特图后重试。");
+    }
 
     this.emit({
       type: "plan.applied",
@@ -426,6 +457,10 @@ export class MeetingOrchestrator {
         { projectId },
         (payload) => `${(payload.members as unknown[])?.length ?? 0} 名成员`,
       );
+      // 身份错了会在这里显形：以前会静默按 0 个成员继续，最后报“抽不出任务”。
+      if (!membersOutcome.ok) {
+        throw new Error(`读取项目成员失败：${membersOutcome.summary}`);
+      }
       const members = (membersOutcome.payload.members as Array<{
         userId: string;
         displayName: string;
@@ -466,6 +501,24 @@ export class MeetingOrchestrator {
           ...extraction.warnings,
         ].filter((line) => line !== "");
         throw new Error(`没能从这段纪要里抽出任务。\n${hints.join("\n")}`);
+      }
+
+      // 2.5 解析成功后才清空旧排期；解析失败会在上面直接抛错，旧数据不受影响。
+      const removedTasks = this.options.beforeCreateTasks?.() ?? 0;
+      if (this.options.beforeCreateTasks !== undefined) {
+        this.emit({
+          type: "tool.call",
+          at: new Date().toISOString(),
+          tool: "clear_schedule",
+          status: "ok",
+          argumentsSummary: "按纪要重建",
+          resultSummary: removedTasks > 0 ? `清空 ${removedTasks} 个旧任务` : "原本没有排期",
+          durationMs: 0,
+          message:
+            removedTasks > 0
+              ? `已清空原有排期（${removedTasks} 个任务），按纪要重建`
+              : "当前排期为空，按纪要新建",
+        });
       }
 
       // 3. 建任务 + 派人

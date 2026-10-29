@@ -15,12 +15,16 @@ export function clearProjectSchedule(
   dependencies: V2RuntimeDependencies,
   projectId: string,
 ): ClearScheduleResult {
-  const project = dependencies.database.get<{ id: string }>(
-    "SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL",
+  const project = dependencies.database.get<{ id: string; archived_at: string | null }>(
+    "SELECT id, archived_at FROM projects WHERE id = ? AND deleted_at IS NULL",
     [projectId],
   );
   if (project === undefined) {
     throw new Error(`项目 ${projectId} 不存在。`);
+  }
+  // 归档项目是只读的：不允许从任何入口清空它的排期。
+  if (project.archived_at !== null) {
+    throw new Error("项目已归档，不能清空排期。请先恢复项目。");
   }
 
   return dependencies.database.transaction(() => {
