@@ -34,6 +34,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
   const contextRef = useRef<AudioContext | undefined>(undefined);
   const processorRef = useRef<ScriptProcessorNode | undefined>(undefined);
   const pendingRef = useRef<Float32Array>(new Float32Array(0));
+  const partialRef = useRef("");
 
   const cleanup = useCallback(() => {
     processorRef.current?.disconnect();
@@ -43,6 +44,12 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     void contextRef.current?.close().catch(() => undefined);
     contextRef.current = undefined;
     pendingRef.current = new Float32Array(0);
+  }, []);
+
+  const pushLine = useCallback((raw: string) => {
+    const text = raw.trim();
+    if (text === "") return;
+    setLines((current) => (current[current.length - 1] === text ? current : [...current, text]));
   }, []);
 
   const stop = useCallback(() => {
@@ -60,6 +67,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     cleanup();
     setStatus("idle");
     setPartial("");
+    partialRef.current = "";
     setLevel(0);
   }, [cleanup]);
 
@@ -131,10 +139,22 @@ export function useRealtimeTranscription(): RealtimeTranscription {
             text?: string;
             message?: string;
           };
-          if (message.type === "partial") setPartial(message.text ?? "");
+          if (message.type === "partial") {
+            const text = message.text ?? "";
+            if (text === "") return;
+            const previous = partialRef.current;
+            // rec 是“当前这句”的累计结果：如果新文本不再包含上一句，
+            // 说明已经进入下一句，把上一句固定下来，别让它被覆盖。
+            if (previous !== "" && !text.startsWith(previous) && !previous.startsWith(text)) {
+              pushLine(previous);
+            }
+            partialRef.current = text;
+            setPartial(text);
+          }
           if (message.type === "final") {
             const text = (message.text ?? "").trim();
-            if (text !== "") setLines((current) => [...current, text]);
+            if (text !== "") pushLine(text);
+            partialRef.current = "";
             setPartial("");
           }
           if (message.type === "error") {
