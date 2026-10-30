@@ -22,6 +22,7 @@ interface RealtimeWorkspaceProps {
 
 export function RealtimeWorkspace({ projectId, onExit, onFinish }: RealtimeWorkspaceProps) {
   const realtime = useRealtimeTranscription();
+  const isEdge = /Edg\//.test(navigator.userAgent);
   const { status, error, partial, lines, level } = realtime;
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
@@ -152,6 +153,11 @@ export function RealtimeWorkspace({ projectId, onExit, onFinish }: RealtimeWorks
           <i><b style={{ width: `${Math.round(level * 100)}%` }} /></i>
           <span className={level > 0.02 ? "on" : ""}>{level > 0.02 ? "有声音" : "没有声音"}</span>
         </div>
+      ) : null}
+      {isEdge ? (
+        <p className="form-error">
+          检测到 Edge：部分阵列麦克风在 Edge 下会被处理成低频噪声，导致没有字幕。请改用 Chrome 打开同一地址。
+        </p>
       ) : null}
       {error !== "" ? <p className="form-error">{error}</p> : null}
 
