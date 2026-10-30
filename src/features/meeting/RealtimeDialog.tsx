@@ -22,8 +22,11 @@ interface RealtimeDialogProps {
 
 export function RealtimeDialog({ projectId, onClose, onDone }: RealtimeDialogProps) {
   const realtime = useRealtimeTranscription();
-  const { status, error, partial, lines } = realtime;
+  const isEdge = /Edg\//.test(navigator.userAgent);
+  const { status, error, partial, lines, level } = realtime;
   const [drafts, setDrafts] = useState<DraftTask[]>([]);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = useState("");
   const [drafting, setDrafting] = useState(false);
   const draftTimer = useRef<number | undefined>(undefined);
 
@@ -47,6 +50,13 @@ export function RealtimeDialog({ projectId, onClose, onDone }: RealtimeDialogPro
   }, [lines, partial, projectId]);
 
   useEffect(() => {
+    void navigator.mediaDevices
+      .enumerateDevices()
+      .then((list) => setDevices(list.filter((device) => device.kind === "audioinput")))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     return () => realtime.stop();
     // 只在关闭时停一次。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,7 +77,32 @@ export function RealtimeDialog({ projectId, onClose, onDone }: RealtimeDialogPro
         <p className="meeting-modal-hint">
           对着麦克风说话，约 1–2 秒后文字出现在下面；说完点「结束并填入纪要」。
         </p>
+        {isEdge ? (
+          <p className="form-error">
+            检测到 Edge：部分阵列麦克风在 Edge 下会被处理成低频噪声，导致没有字幕。请改用 Chrome 打开同一地址。
+          </p>
+        ) : null}
 
+        {status === "live" ? (
+          <div className="meeting-realtime-meter" title="麦克风电平">
+            <span>麦克风</span>
+            <i><b style={{ width: `${Math.round(level * 100)}%` }} /></i>
+            <span className={level > 0.02 ? "on" : ""}>{level > 0.02 ? "有声音" : "没有声音"}</span>
+          </div>
+        ) : null}
+        {status === "idle" && devices.length > 1 ? (
+          <label className="meeting-realtime-device">
+            <span>麦克风</span>
+            <select value={deviceId} onChange={(event) => setDeviceId(event.target.value)}>
+              <option value="">系统默认</option>
+              {devices.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label !== "" ? device.label : `麦克风 ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <div className="meeting-realtime-body">
           {status === "idle" && lines.length === 0 && partial === "" ? (
             <div className="meeting-realtime-empty">
@@ -133,7 +168,7 @@ export function RealtimeDialog({ projectId, onClose, onDone }: RealtimeDialogPro
               type="button"
               onClick={() => {
                 realtime.reset();
-                void realtime.start(projectId);
+                void realtime.start(projectId, deviceId === "" ? undefined : deviceId);
               }}
             >
               <Mic size={15} /> 开始实时记录

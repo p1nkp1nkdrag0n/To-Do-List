@@ -13,6 +13,8 @@
  *  服务端 → JSON：errno 7=start ok，8=中间 var，0=中间 rec，9=最后一句。
  */
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 
@@ -34,6 +36,8 @@ interface ConnectionState {
   startedAt: number;
   lastText: string;
   frames: number;
+  messages: number;
+  dump?: Buffer[];
 }
 
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {
@@ -102,6 +106,8 @@ export class RealtimeAsrHub {
         startedAt: Date.now(),
         lastText: "",
         frames: 0,
+        messages: 0,
+        dump: process.env.REALTIME_DUMP === "1" ? [] : undefined,
       };
       this.webSockets.handleUpgrade(request, socket, head, (webSocket) => {
         this.acceptConnection(webSocket, state);
@@ -113,6 +119,7 @@ export class RealtimeAsrHub {
 
   private acceptConnection(socket: WebSocket, state: ConnectionState): void {
     this.connections.set(socket, state);
+    console.log(`[realtime] 新会话 user=${state.userId} project=${state.projectId ?? "-"}`);
     const config = readAsrConfig(state.userId);
     if (config === null) {
       this.send(socket, { type: "error", message: "还没有配置思必驰的 productId / apiKey。" });
@@ -153,6 +160,11 @@ export class RealtimeAsrHub {
         return;
       }
       const onebest = message.data?.onebest ?? "";
+      state.messages += 1;
+      // 诊断：前几条结果无论有没有文字都记下来，便于判断服务端是否在解码。
+      if (state.messages <= 8) {
+        console.log(`[realtime] msg#${state.messages} errno=${String(message.errno)} len=${onebest.length} ${onebest.slice(0, 40)}`);
+      }
       if (onebest !== "") state.lastText = onebest;
       if (message.errno === 8) {
         this.send(socket, { type: "partial", text: onebest });
@@ -172,6 +184,7 @@ export class RealtimeAsrHub {
     });
 
     upstream.on("error", (error) => {
+      console.log(`[realtime] 上游错误：${error.message}`);
       this.send(socket, { type: "error", message: `连接思必驰失败：${error.message}` });
       socket.close();
     });
@@ -185,6 +198,10 @@ export class RealtimeAsrHub {
       if (isBinary) {
         const frame = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
         state.frames += 1;
+        if (state.dump !== undefined && state.dump.length < 500) state.dump.push(frame);
+        if (state.frames % 100 === 0) {
+          console.log(`[realtime] 已收 ${state.frames} 帧（upstream=${upstream.readyState}）`);
+        }
         if (upstream.readyState === WebSocket.OPEN) upstream.send(frame);
         else if (state.pending.length < 200) state.pending.push(frame);
         return;
@@ -203,6 +220,31 @@ export class RealtimeAsrHub {
       state.closed = true;
       this.connections.delete(socket);
       upstream.close();
+      if (state.dump !== undefined && state.dump.length > 0) {
+        try {
+          const pcm = Buffer.concat(state.dump);
+          const header = Buffer.alloc(44);
+          header.write("RIFF", 0);
+          header.writeUInt32LE(36 + pcm.length, 4);
+          header.write("WAVE", 8);
+          header.write("fmt ", 12);
+          header.writeUInt32LE(16, 16);
+          header.writeUInt16LE(1, 20);
+          header.writeUInt16LE(1, 22);
+          header.writeUInt32LE(16000, 24);
+          header.writeUInt32LE(32000, 28);
+          header.writeUInt16LE(2, 32);
+          header.writeUInt16LE(16, 34);
+          header.write("data", 36);
+          header.writeUInt32LE(pcm.length, 40);
+          const dir = path.join(process.cwd(), ".tmp");
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, `rt-dump-${Date.now()}.wav`), Buffer.concat([header, pcm]));
+          console.log(`[realtime] 已保存音频样本 ${(pcm.length / 32000).toFixed(1)} 秒`);
+        } catch (error) {
+          console.log("[realtime] 保存音频失败", error);
+        }
+      }
       console.log(
         `[realtime] 会话结束 user=${state.userId} 时长=${((Date.now() - state.startedAt) / 1000).toFixed(1)}s`,
       );

@@ -1341,3 +1341,52 @@
   color: var(--muted);
   white-space: nowrap;
 }
+
+.meeting-realtime-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.meeting-realtime-meter i {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.meeting-realtime-meter b {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #22c55e;
+  transition: width 120ms linear;
+}
+
+.meeting-realtime-meter .on {
+  color: #15803d;
+}
+
+.meeting-realtime-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.meeting-realtime-device select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+}
