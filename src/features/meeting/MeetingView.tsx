@@ -426,6 +426,32 @@ export function MeetingView({
   }, [project.members]);
 
   /** 选好音频：上传 → 后台转写 → 轮询 → 自动填进纪要框。 */
+  /** 生成会议纪要并存档到资料库；失败不阻断主流程。 */
+  const saveMeetingSummary = useCallback(
+    async (
+      transcript: string,
+      tasks?: Array<{
+        title: string;
+        ownerName: string;
+        estimatedHours: number;
+        dueDate?: string | null;
+      }>,
+    ) => {
+      if (transcript.trim() === "") return;
+      try {
+        const result = await api.post<{ title: string }>("/api/meeting/summary", {
+          projectId,
+          transcript,
+          ...(tasks !== undefined && tasks.length > 0 ? { tasks } : {}),
+        });
+        setNotice(`会议纪要已存入资料库：${result.title}`);
+      } catch (caught) {
+        setNotice(`会议纪要存档失败：${errorMessage(caught)}`);
+      }
+    },
+    [projectId],
+  );
+
   const uploadAudio = useCallback(async (file: File, hotwords: string[]) => {
     setAudioJob({ progress: 1, note: "上传中" });
     setError("");
@@ -467,6 +493,7 @@ export function MeetingView({
           setMinutesText(job.text ?? "");
           setInputMode("minutes");
           setMinutesOpen(true);
+          void saveMeetingSummary(job.text ?? "");
           setNotice("转写完成，已填入纪要，检查后点「开始处理」。");
           setAudioJob(null);
           try {
@@ -645,6 +672,7 @@ export function MeetingView({
             setInputMode("minutes");
             setRealtimeMode(false);
             await startFromMinutes(text, tasks);
+            void saveMeetingSummary(text, tasks);
           }}
         />
       </div>

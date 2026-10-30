@@ -258,6 +258,8 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
                   <p>
                     这是和「录音文件转写」分开的服务：DUI 控制台创建产品时勾选
                     「实时长语音转写」，并购买时长套餐（没有额度会返回 120100）。
+                    两个产品可以不同，在「AI 设置 → 语音转写」里分别填文件转写的
+                    productId/apiKey 和下面两个「实时转写」字段即可。
                   </p>
                 </li>
                 <li>

@@ -127,9 +127,12 @@ export class RealtimeAsrHub {
       return;
     }
 
+    // 实时转写通常是另一个产品：优先用 realtime 的那对凭证。
+    const realtimeProductId = config.realtimeProductId ?? config.productId;
+    const realtimeApiKey = config.realtimeApiKey ?? config.apiKey;
     const url =
-      `wss://lasr.duiopen.com/live/ws2?productId=${encodeURIComponent(config.productId)}` +
-      `&apikey=${encodeURIComponent(config.apiKey)}`;
+      `wss://lasr.duiopen.com/live/ws2?productId=${encodeURIComponent(realtimeProductId)}` +
+      `&apikey=${encodeURIComponent(realtimeApiKey)}`;
     const upstream = new WebSocket(url);
     state.upstream = upstream;
 

@@ -32,6 +32,9 @@ export const AsrConfigSchema = z
     version: z.literal(1),
     productId: z.string().min(1).max(64),
     apiKey: z.string().min(1).max(200),
+    // 实时长语音转写是另一个产品（另一把 Key）；没填就退回上面的文件转写配置。
+    realtimeProductId: z.string().min(1).max(64).optional(),
+    realtimeApiKey: z.string().min(1).max(200).optional(),
   })
   .strict();
 
@@ -41,6 +44,9 @@ export interface AsrConfigView {
   productId: string;
   keyHint: string;
   hasKey: boolean;
+  realtimeProductId: string;
+  realtimeKeyHint: string;
+  hasRealtimeKey: boolean;
 }
 
 export function readAsrConfig(userId: string): AsrConfig | null {
@@ -61,10 +67,24 @@ export function writeAsrConfig(userId: string, config: AsrConfig): void {
 }
 
 export function asrConfigView(config: AsrConfig | null): AsrConfigView {
-  if (config === null) return { productId: "", keyHint: "", hasKey: false };
+  if (config === null) {
+    return {
+      productId: "",
+      keyHint: "",
+      hasKey: false,
+      realtimeProductId: "",
+      realtimeKeyHint: "",
+      hasRealtimeKey: false,
+    };
+  }
+  const realtimeKey = config.realtimeApiKey;
   return {
     productId: config.productId,
     keyHint: config.apiKey.length > 4 ? `****${config.apiKey.slice(-4)}` : "****",
     hasKey: true,
+    realtimeProductId: config.realtimeProductId ?? "",
+    realtimeKeyHint:
+      realtimeKey === undefined ? "" : realtimeKey.length > 4 ? `****${realtimeKey.slice(-4)}` : "****",
+    hasRealtimeKey: realtimeKey !== undefined,
   };
 }

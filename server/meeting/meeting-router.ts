@@ -30,6 +30,8 @@ import { asrConfigView, readAsrConfig, writeAsrConfig, AsrConfigSchema } from ".
 import { AsrError, audioFormatFor, createAudio, transcribeAudio } from "./asr.js";
 import { correctTranscript } from "./asr-correct.js";
 import { extractTasksFromText } from "./extractor.js";
+import { generateMinutes } from "./summary.js";
+import { ResourceService } from "../modules/resources/resource-service.js";
 import { chatJson } from "./llm.js";
 import {
   activateProvider,
@@ -54,6 +56,23 @@ const RunMeetingRequestSchema = z
 const DraftTasksSchema = z.object({
   projectId: z.string().min(1),
   minutes: z.string().min(1).max(200_000),
+});
+
+const SummarySchema = z.object({
+  projectId: z.string().min(1),
+  transcript: z.string().min(1).max(200_000),
+  tasks: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(60),
+        ownerName: z.string().min(1).max(40),
+        estimatedHours: z.number().positive().max(200),
+        dueDate: z.string().nullable().optional(),
+      }),
+    )
+    .max(60)
+    .optional(),
+  save: z.boolean().optional(),
 });
 
 const CorrectTextSchema = z.object({
@@ -276,6 +295,8 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         .object({
           productId: z.string().trim().min(1).max(64),
           apiKey: z.string().trim().max(200).optional(),
+          realtimeProductId: z.string().trim().max(64).optional(),
+          realtimeApiKey: z.string().trim().max(200).optional(),
         })
         .strict(),
       request,
@@ -286,7 +307,25 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     if (apiKey === undefined || apiKey === "") {
       throw new HttpError(400, "ASR_KEY_REQUIRED", "第一次配置需要填 apiKey。");
     }
-    writeAsrConfig(userId, AsrConfigSchema.parse({ version: 1, productId: input.productId, apiKey }));
+    const realtimeApiKey =
+      input.realtimeApiKey !== undefined && input.realtimeApiKey !== ""
+        ? input.realtimeApiKey
+        : existing?.realtimeApiKey;
+    const realtimeProductId =
+      input.realtimeProductId !== undefined && input.realtimeProductId !== ""
+        ? input.realtimeProductId
+        : existing?.realtimeProductId;
+    writeAsrConfig(
+      userId,
+      AsrConfigSchema.parse({
+        version: 1,
+        productId: input.productId,
+        apiKey,
+        ...(realtimeProductId !== undefined && realtimeApiKey !== undefined
+          ? { realtimeProductId, realtimeApiKey }
+          : {}),
+      }),
+    );
     response.json(asrConfigView(readAsrConfig(userId)));
   });
 
@@ -312,6 +351,47 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     });
     const extraction = await extractTasksFromText(corrected, memberNames, auth.user.id);
     response.json({ tasks: extraction.tasks, warnings: extraction.warnings });
+  }));
+
+  /** 生成会议纪要，并（默认）存档到资料库。 */
+  router.post("/summary", asyncRoute(async (request, response) => {
+    const { projectId, transcript, tasks, save } = parseRequestBody(SummarySchema, request);
+    const auth = response.locals.auth;
+    new AvailabilityService(dependencies).projectSummary(auth, projectId);
+
+    const now = new Date();
+    const stamp = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+      .format(now)
+      .replace(/\//g, "-");
+    const title = `会议纪要 ${stamp}`;
+
+    const markdown = await generateMinutes({
+      userId: auth.user.id,
+      transcript,
+      tasks,
+      title,
+    });
+
+    let resourceId: string | null = null;
+    if (save !== false) {
+      const resources = new ResourceService(dependencies);
+      const created = resources.create(
+        auth,
+        projectId,
+        { kind: "markdown", title, markdownContent: markdown },
+        undefined,
+      );
+      resourceId = created.resource.id;
+    }
+    response.json({ title, markdown, resourceId });
   }));
 
   /** 实时转写没有热词参数：拿到文本后按项目成员名做一次同音字校正。 */

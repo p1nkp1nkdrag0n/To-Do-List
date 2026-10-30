@@ -27,6 +27,15 @@ interface LlmConfigView {
   envAvailable: boolean;
 }
 
+type AsrView = {
+  productId: string;
+  keyHint: string;
+  hasKey: boolean;
+  realtimeProductId: string;
+  realtimeKeyHint: string;
+  hasRealtimeKey: boolean;
+};
+
 export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [view, setView] = useState<LlmConfigView>();
   const [pendingKey, setPendingKey] = useState("");
@@ -35,9 +44,11 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   /** 每个供应商可选的模型（预设 + 从平台拉到的）。 */
-  const [asr, setAsr] = useState<{ productId: string; keyHint: string; hasKey: boolean }>();
+  const [asr, setAsr] = useState<AsrView>();
   const [asrProductId, setAsrProductId] = useState("");
   const [asrKey, setAsrKey] = useState("");
+  const [asrRealtimeProductId, setAsrRealtimeProductId] = useState("");
+  const [asrRealtimeKey, setAsrRealtimeKey] = useState("");
   const [asrMessage, setAsrMessage] = useState("");
   const [asrTab, setAsrTab] = useState<"import" | "manual">("import");
   const [importText, setImportText] = useState("");
@@ -87,7 +98,7 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
       setAsrMessage("");
       setAsrKey("");
       void api
-        .get<{ productId: string; keyHint: string; hasKey: boolean }>("/api/meeting/asr-config")
+        .get<AsrView>("/api/meeting/asr-config")
         .then((config) => {
           setAsr(config);
           setAsrProductId(config.productId);
@@ -237,12 +248,13 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
     }
     setAsrMessage("导入中…");
     try {
-      const next = await api.put<{ productId: string; keyHint: string; hasKey: boolean }>(
+      const next = await api.put<AsrView>(
         "/api/meeting/asr-config",
         { productId: match[1], apiKey: match[2] },
       );
       setAsr(next);
       setAsrProductId(next.productId);
+      setAsrRealtimeProductId(next.realtimeProductId);
       setImportText("");
       setAsrMessage(`已导入 productId ${next.productId}，Key ${next.keyHint}。`);
     } catch (caught) {
@@ -261,9 +273,14 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
     }
     setAsrMessage("保存中…");
     try {
-      const next = await api.put<{ productId: string; keyHint: string; hasKey: boolean }>(
+      const next = await api.put<AsrView>(
         "/api/meeting/asr-config",
-        { productId: asrProductId.trim(), apiKey: asrKey.trim() === "" ? undefined : asrKey.trim() },
+        {
+          productId: asrProductId.trim(),
+          apiKey: asrKey.trim() === "" ? undefined : asrKey.trim(),
+          realtimeProductId: asrRealtimeProductId.trim() === "" ? undefined : asrRealtimeProductId.trim(),
+          realtimeApiKey: asrRealtimeKey.trim() === "" ? undefined : asrRealtimeKey.trim(),
+        },
       );
       setAsr(next);
       setAsrKey("");
@@ -434,6 +451,23 @@ export function LlmSettings({ open, onClose }: { open: boolean; onClose: () => v
                         value={asrKey}
                         onChange={(event) => setAsrKey(event.target.value)}
                         placeholder={asr?.hasKey === true ? `已保存 ${asr.keyHint}，留空则不修改` : "粘贴 apiKey"}
+                      />
+                    </label>
+                    <label>
+                      实时转写 productId（可选）
+                      <input
+                        value={asrRealtimeProductId}
+                        onChange={(event) => setAsrRealtimeProductId(event.target.value)}
+                        placeholder={asr?.hasRealtimeKey === true ? asr.realtimeProductId : "实时长语音转写是另一个产品，填它的 productId"}
+                      />
+                    </label>
+                    <label>
+                      实时转写 apiKey（可选）
+                      <input
+                        type="password"
+                        value={asrRealtimeKey}
+                        onChange={(event) => setAsrRealtimeKey(event.target.value)}
+                        placeholder={asr?.hasRealtimeKey === true ? `已保存 ${asr.realtimeKeyHint}，留空则不修改` : "留空则实时转写也使用上面的 Key"}
                       />
                     </label>
                     <div className="llm-asr-actions">
