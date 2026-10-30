@@ -637,6 +637,7 @@ export function MeetingView({
       <div className="meeting-view">
         <RealtimeWorkspace
           projectId={project.project.id}
+          members={project.members.map((member) => member.displayName)}
           onExit={() => setRealtimeMode(false)}
           onFinish={async (text) => {
             setMinutesText(text);

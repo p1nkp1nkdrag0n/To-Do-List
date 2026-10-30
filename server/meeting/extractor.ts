@@ -43,6 +43,8 @@ const SYSTEM_PROMPT = [
   "2. ownerName 优先用成员名单里的写法：如果原文的名字与某个成员同音或只差一两个字（例如「秋叶恒」和「邱业恒」），把它改写成名单里的写法。",
   "2.0 如果确实找不到对应成员，再照原文写；不要换成名单里毫不相干的人。",
   "2.1 如果纪要只是记录「改了什么」，没有写明谁来做，ownerName 填「未分配」，**不要因此省略这条任务**。",
+  "2.2 代词解析：我/我们 → 只有在纪要里能看出说话人（「发言人N：」「名字：」或自我介绍「我是X」）时才用对应成员；看不出是谁就填「未分配」，不要猜。你/你们 → 句子里被称呼的人。他/她/他们 → 只有上下文能明确指向某个成员时才用，否则填「未分配」。",
+  "2.3 口语化表达要转成可执行的任务：「弄一下 / 搞定 / 盯一下 / 收个尾」写成具体动作（例如「完成演示稿」「跟进甘特图」）；工时按原话数字，没有就不写；日期没说就填 null，不要猜。",
   "3. estimatedHours 用数字，单位小时；没说工时就按同类任务估一个合理值（4~8）。",
   "4. dueDate 必须是 YYYY-MM-DD；根据今天的日期和纪要里的「这周」「下周三」「周末」等说法换算。纪要没说时间就填 null，不要猜成今天。",
   "5. dependsOnTitle 只有明确说「等谁做完我才能开始」时才填，值必须是另一个任务的 title。",
@@ -169,6 +171,12 @@ export async function extractTasksFromText(
         const names = [...new Set(unknown.map((task) => task.ownerName))].join("、");
         warnings.push(
           `${names} 不在项目成员里，相关 ${unknown.length} 条任务已跳过；需要的话先把他们加进项目再重试。`,
+        );
+      }
+      const pronounUnresolved = valid.filter((task) => task.ownerName === "未分配").length;
+      if (pronounUnresolved > 0 && /[我你他她]|咱们|大家/.test(text)) {
+        warnings.push(
+          `有 ${pronounUnresolved} 条任务用「我 / 你 / 他」指代负责人，但没能确定具体是谁，已标为「未分配」，请手动指派。`,
         );
       }
       if (valid.length > 0) {

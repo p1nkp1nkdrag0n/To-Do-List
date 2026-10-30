@@ -13,6 +13,7 @@ export interface RealtimeTranscription {
   partial: string;
   lines: string[];
   level: number;
+  replaceLine: (index: number, text: string) => void;
   start: (projectId: string, deviceId?: string) => Promise<void>;
   stop: () => void;
   reset: () => void;
@@ -228,5 +229,9 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     }
   }, [cleanup, status]);
 
-  return { status, error, partial, lines, level, start, stop, reset };
+  const replaceLine = useCallback((index: number, text: string) => {
+    setLines((current) => current.map((line, position) => (position === index ? text : line)));
+  }, []);
+
+  return { status, error, partial, lines, level, start, stop, reset, replaceLine };
 }

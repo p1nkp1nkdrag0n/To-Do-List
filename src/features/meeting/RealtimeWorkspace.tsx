@@ -16,12 +16,14 @@ interface DraftTask {
 
 interface RealtimeWorkspaceProps {
   projectId: string;
+  members: string[];
   onExit: () => void;
   onFinish: (text: string) => Promise<void> | void;
 }
 
-export function RealtimeWorkspace({ projectId, onExit, onFinish }: RealtimeWorkspaceProps) {
+export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: RealtimeWorkspaceProps) {
   const realtime = useRealtimeTranscription();
+  const { replaceLine } = realtime;
   const isEdge = /Edg\//.test(navigator.userAgent);
   const { status, error, partial, lines, level } = realtime;
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -32,6 +34,8 @@ export function RealtimeWorkspace({ projectId, onExit, onFinish }: RealtimeWorks
   const [finishing, setFinishing] = useState(false);
   const draftTimer = useRef<number | undefined>(undefined);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const correctedCount = useRef(0);
+  const correcting = useRef(false);
 
   useEffect(() => {
     void navigator.mediaDevices
@@ -50,6 +54,25 @@ export function RealtimeWorkspace({ projectId, onExit, onFinish }: RealtimeWorks
     const element = transcriptRef.current;
     if (element !== null) element.scrollTop = element.scrollHeight;
   }, [lines, partial]);
+
+  useEffect(() => {
+    if (status !== "live" && status !== "idle") return;
+    if (members.length === 0 || correcting.current) return;
+    if (correctedCount.current >= lines.length) return;
+    correcting.current = true;
+    const index = correctedCount.current;
+    const text = lines[index] ?? "";
+    correctedCount.current += 1;
+    void api
+      .post<{ text: string }>("/api/meeting/correct", { text, hotwords: members })
+      .then((result) => {
+        if (result.text !== "" && result.text !== text) replaceLine(index, result.text);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        correcting.current = false;
+      });
+  }, [lines, members, replaceLine, status]);
 
   // 边说边拟：每句落定后等 1.2 秒，用最近 2000 字抽一次草稿（只读）。
   useEffect(() => {
