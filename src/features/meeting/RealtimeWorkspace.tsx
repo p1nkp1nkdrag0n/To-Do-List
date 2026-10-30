@@ -112,7 +112,11 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
     return () => window.clearTimeout(draftTimer.current);
   }, [lines, partial, projectId]);
 
-  const transcript = useMemo(() => lines.join("\n"), [lines]);
+  // 字幕列表 + 正在说的这一句：点结束时当前句子也要带上，不能丢。
+  const transcript = useMemo(
+    () => [...lines, partial].filter((line) => line.trim() !== "").join("\n"),
+    [lines, partial],
+  );
   const isLive = status === "live" || status === "connecting";
 
   const finish = async () => {
@@ -211,7 +215,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
           </div>
           <div className="realtime-review-list">
             {review.tasks.map((task, index) => (
-              <div className="realtime-review-row" key={`${task.title}-${index}`}>
+              <div className="realtime-review-row" key={index}>
                 <input
                   className="realtime-review-title"
                   value={task.title}
