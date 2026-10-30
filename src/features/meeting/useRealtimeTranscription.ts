@@ -218,11 +218,18 @@ export function useRealtimeTranscription(): RealtimeTranscription {
       highpass.connect(processor);
       processor.connect(context.destination);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
+      const error = caught as { name?: string; message?: string };
+      const name = error.name ?? "";
       setError(
-        message.includes("Permission") || message.includes("denied")
-          ? "浏览器没有麦克风权限，请允许后重试。"
-          : `启动麦克风失败：${message}`,
+        name === "NotAllowedError" || name === "PermissionDeniedError"
+          ? "浏览器拒绝了麦克风权限：点地址栏左侧的图标 → 允许麦克风 → 刷新页面重试。"
+          : name === "NotFoundError" || name === "DevicesNotFoundError"
+            ? "没有找到可用的麦克风：确认设备已连接，或到 Windows 声音设置里启用输入设备。"
+            : name === "NotReadableError" || name === "TrackStartError"
+              ? "麦克风被其他软件占用了：关掉腾讯会议 / 钉钉 / 浏览器其他标签页后再试。"
+              : name === "OverconstrainedError"
+                ? "这个麦克风不支持当前录音参数：换一个输入设备再试。"
+                : `启动麦克风失败：${error.message ?? String(caught)}`,
       );
       setStatus("error");
       cleanup();

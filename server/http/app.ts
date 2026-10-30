@@ -43,7 +43,13 @@ export function createV2App(
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("X-Frame-Options", "DENY");
     response.setHeader("Referrer-Policy", "same-origin");
-    response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    // 麦克风要允许本站使用：实时会议需要 getUserMedia。
+    // 之前写成 microphone=() 会把生产环境（exe）的麦克风整个禁掉，
+    // 开发环境由 Vite 提供页面、没有这个头，所以只有 exe 里录不了音。
+    response.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(self), geolocation=()",
+    );
     next();
   });
   app.set("trust proxy", runtime.trustProxyHops);
