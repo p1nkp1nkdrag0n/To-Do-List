@@ -5,7 +5,7 @@ import type { CollaborationState } from "../../lib/collaboration-state";
 import { api, errorMessage } from "../../lib/api";
 import type { ProjectDetail } from "../../types";
 import { LlmSettings } from "./LlmSettings";
-import { RealtimeDialog } from "./RealtimeDialog";
+import { RealtimeWorkspace } from "./RealtimeWorkspace";
 import {
   DEMO_AUDIO_SECONDS,
   DEMO_TASKS,
@@ -98,7 +98,7 @@ export function MeetingView({
   const [uploadingMinutes, setUploadingMinutes] = useState(false);
   const [audioJob, setAudioJob] = useState<{ progress: number; note: string } | null>(null);
   const [audioOpen, setAudioOpen] = useState(false);
-  const [realtimeOpen, setRealtimeOpen] = useState(false);
+  const [realtimeMode, setRealtimeMode] = useState(false);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [hotwordText, setHotwordText] = useState("");
   const [audioHint, setAudioHint] = useState("");
@@ -333,8 +333,8 @@ export function MeetingView({
   }, [currentUserId, projectId]);
 
   /** 从粘贴的会议纪要开始：抽任务 → 建库 → 排期 → 修复，全自动。 */
-  const startFromMinutes = useCallback(async () => {
-    const trimmed = minutesText.trim();
+  const startFromMinutes = useCallback(async (override?: string) => {
+    const trimmed = (override ?? minutesText).trim();
     if (trimmed === "") return;
     setMinutesOpen(false);
     setInputMode("minutes");
@@ -632,6 +632,23 @@ export function MeetingView({
   const conflictsAfter = run?.conflictsAfter ?? 0;
   const progress = Math.min(100, Math.round((revealed / DEMO_TRANSCRIPT.length) * 100));
 
+  if (realtimeMode) {
+    return (
+      <div className="meeting-view">
+        <RealtimeWorkspace
+          projectId={project.project.id}
+          onExit={() => setRealtimeMode(false)}
+          onFinish={async (text) => {
+            setMinutesText(text);
+            setInputMode("minutes");
+            setRealtimeMode(false);
+            await startFromMinutes(text);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="meeting-view">
       <header className="meeting-toolbar glass-panel">
@@ -711,7 +728,7 @@ export function MeetingView({
             className="secondary-button"
             type="button"
             disabled={phase === "transcribing" || phase === "running"}
-            onClick={() => setRealtimeOpen(true)}
+            onClick={() => setRealtimeMode(true)}
           >
             <Mic size={15} /> 实时记录
           </button>
@@ -796,32 +813,6 @@ export function MeetingView({
           </div>
         ) : null}
       </header>
-
-      {realtimeOpen ? (
-        <RealtimeDialog
-          projectId={project.project.id}
-          onClose={() => setRealtimeOpen(false)}
-          onDone={(text) => {
-            // 实时接口没有热词参数，落库前先按成员名纠正同音字。
-            void api
-              .post<{ text: string }>("/api/meeting/correct", {
-                text,
-                hotwords: project.members.map((member) => member.displayName),
-              })
-              .then((result) => result.text)
-              .catch(() => text)
-              .then((finalText) => {
-                setMinutesText((current) =>
-                  current.trim() === "" ? finalText : `${current}\n${finalText}`,
-                );
-                setInputMode("minutes");
-                // 打开纪要弹窗，让用户先看一眼再处理。
-                setMinutesOpen(true);
-                setNotice("实时记录已填入纪要，检查后点「开始处理」。");
-              });
-          }}
-        />
-      ) : null}
 
       {audioOpen ? (
         <div className="meeting-modal-mask">
@@ -1002,7 +993,7 @@ export function MeetingView({
               <button className="secondary-button" type="button" onClick={pickAudio}>
                 <Upload size={16} /> 上传会议录音
               </button>
-              <button className="secondary-button" type="button" onClick={() => setRealtimeOpen(true)}>
+              <button className="secondary-button" type="button" onClick={() => setRealtimeMode(true)}>
                 <Mic size={16} /> 实时记录
               </button>
               {!online ? <p className="meeting-hint">当前离线：上传后只做本地演示。</p> : null}

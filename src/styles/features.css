@@ -1390,3 +1390,182 @@
   color: var(--ink);
   font-size: 12.5px;
 }
+
+/* 实时会议工作区（页内分栏） */
+.realtime-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 16px 12px;
+}
+
+.realtime-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.realtime-head > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.realtime-timer {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.realtime-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.realtime-dot.on {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgb(239 68 68 / 18%);
+}
+
+.realtime-state {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.realtime-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.realtime-device {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  max-width: 260px;
+}
+
+.realtime-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.realtime-meter i {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.realtime-meter b {
+  display: block;
+  height: 100%;
+  background: #22c55e;
+  transition: width 100ms linear;
+}
+
+.realtime-meter .on {
+  color: #15803d;
+}
+
+.realtime-split {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.realtime-transcript,
+.realtime-drafts {
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.realtime-transcript {
+  flex: 1.15;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.realtime-drafts {
+  width: 38%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.realtime-drafts-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.realtime-drafts-head strong {
+  color: var(--ink);
+}
+
+.realtime-draft {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  background: var(--surface-soft);
+}
+
+.realtime-draft span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.realtime-line {
+  margin: 0;
+}
+
+.realtime-partial {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.realtime-placeholder {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.realtime-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.realtime-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
