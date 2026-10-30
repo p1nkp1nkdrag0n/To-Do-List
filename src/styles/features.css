@@ -1252,3 +1252,92 @@
 .llm-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* 实时会议记录 */
+.meeting-realtime-body {
+  min-height: 220px;
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+
+.meeting-realtime-empty {
+  height: 196px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.meeting-realtime-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.meeting-realtime-line {
+  margin: 0;
+  color: var(--ink);
+}
+
+.meeting-realtime-partial {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.meeting-realtime-placeholder {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* 实时会议：任务草稿 */
+.meeting-realtime-drafts {
+  margin-top: 12px;
+  border-top: 1px dashed var(--glass-border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meeting-realtime-drafts-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.meeting-realtime-drafts-head strong {
+  color: var(--ink);
+}
+
+.meeting-realtime-draft {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  font-size: 12.5px;
+}
+
+.meeting-realtime-draft-title {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.meeting-realtime-draft-meta {
+  color: var(--muted);
+  white-space: nowrap;
+}

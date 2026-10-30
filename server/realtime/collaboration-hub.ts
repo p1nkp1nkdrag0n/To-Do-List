@@ -106,10 +106,8 @@ export class CollaborationHub {
       rejectUpgrade(socket, 400, "Bad Request");
       return;
     }
-    if (requestUrl.pathname !== "/ws") {
-      rejectUpgrade(socket, 404, "Not Found");
-      return;
-    }
+    // 别的 WebSocket 入口可能处理这个路径，这里只安静地让出去。
+    if (requestUrl.pathname !== "/ws") return;
     try {
       const projectId = requestUrl.searchParams.get("projectId");
       if (projectId === null) {

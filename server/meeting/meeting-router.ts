@@ -29,6 +29,7 @@ import { MeetingControl } from "./control.js";
 import { asrConfigView, readAsrConfig, writeAsrConfig, AsrConfigSchema } from "./asr-config.js";
 import { AsrError, audioFormatFor, createAudio, transcribeAudio } from "./asr.js";
 import { correctTranscript } from "./asr-correct.js";
+import { extractTasksFromText } from "./extractor.js";
 import { chatJson } from "./llm.js";
 import {
   activateProvider,
@@ -50,6 +51,16 @@ const RunMeetingRequestSchema = z
   .strict();
 
 /** 纪要路径：带 minutes 就从纪要抽任务，不带就是老的「只修复」路径。 */
+const DraftTasksSchema = z.object({
+  projectId: z.string().min(1),
+  minutes: z.string().min(1).max(200_000),
+});
+
+const CorrectTextSchema = z.object({
+  text: z.string().min(1).max(200_000),
+  hotwords: z.array(z.string().min(1).max(40)).max(200).optional(),
+});
+
 const RunWithMinutesSchema = z
   .object({
     projectId: z.string().min(1),
@@ -264,6 +275,41 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
     writeAsrConfig(userId, AsrConfigSchema.parse({ version: 1, productId: input.productId, apiKey }));
     response.json(asrConfigView(readAsrConfig(userId)));
   });
+
+  /** 实时会议：边听边拟任务（只读，不写库）。 */
+  router.post("/draft", asyncRoute(async (request, response) => {
+    const { projectId, minutes } = parseRequestBody(DraftTasksSchema, request);
+    const auth = response.locals.auth;
+    new AvailabilityService(dependencies).projectSummary(auth, projectId);
+    const names = dependencies.database
+      .prepare(
+        `SELECT users.display_name AS displayName
+           FROM project_members
+           JOIN users ON users.id = project_members.user_id
+          WHERE project_members.project_id = ? AND project_members.removed_at IS NULL`,
+      )
+      .all(projectId) as Array<{ displayName: string }>;
+    const memberNames = names.map((member) => member.displayName);
+    // 实时识别容易把名字听成同音字，先按成员名校正再抽任务。
+    const corrected = await correctTranscript({
+      userId: auth.user.id,
+      text: minutes,
+      hotwords: memberNames,
+    });
+    const extraction = await extractTasksFromText(corrected, memberNames, auth.user.id);
+    response.json({ tasks: extraction.tasks, warnings: extraction.warnings });
+  }));
+
+  /** 实时转写没有热词参数：拿到文本后按项目成员名做一次同音字校正。 */
+  router.post("/correct", asyncRoute(async (request, response) => {
+    const { text, hotwords } = parseRequestBody(CorrectTextSchema, request);
+    const corrected = await correctTranscript({
+      userId: response.locals.auth.user.id,
+      text,
+      hotwords,
+    });
+    response.json({ text: corrected });
+  }));
 
   /** 测试凭证：只创建音频（不建任务、不计费），能验证 Key 和 IP 白名单。 */
   router.post("/asr-config/test", asyncRoute(async (_request, response) => {

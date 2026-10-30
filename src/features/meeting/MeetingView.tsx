@@ -5,6 +5,7 @@ import type { CollaborationState } from "../../lib/collaboration-state";
 import { api, errorMessage } from "../../lib/api";
 import type { ProjectDetail } from "../../types";
 import { LlmSettings } from "./LlmSettings";
+import { RealtimeDialog } from "./RealtimeDialog";
 import {
   DEMO_AUDIO_SECONDS,
   DEMO_TASKS,
@@ -97,6 +98,7 @@ export function MeetingView({
   const [uploadingMinutes, setUploadingMinutes] = useState(false);
   const [audioJob, setAudioJob] = useState<{ progress: number; note: string } | null>(null);
   const [audioOpen, setAudioOpen] = useState(false);
+  const [realtimeOpen, setRealtimeOpen] = useState(false);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [hotwordText, setHotwordText] = useState("");
   const [audioHint, setAudioHint] = useState("");
@@ -709,6 +711,14 @@ export function MeetingView({
             className="secondary-button"
             type="button"
             disabled={phase === "transcribing" || phase === "running"}
+            onClick={() => setRealtimeOpen(true)}
+          >
+            <Mic size={15} /> 实时记录
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={phase === "transcribing" || phase === "running"}
             onClick={() => setMinutesOpen(true)}
           >
             <FileText size={15} /> 粘贴会议纪要
@@ -786,6 +796,32 @@ export function MeetingView({
           </div>
         ) : null}
       </header>
+
+      {realtimeOpen ? (
+        <RealtimeDialog
+          projectId={project.project.id}
+          onClose={() => setRealtimeOpen(false)}
+          onDone={(text) => {
+            // 实时接口没有热词参数，落库前先按成员名纠正同音字。
+            void api
+              .post<{ text: string }>("/api/meeting/correct", {
+                text,
+                hotwords: project.members.map((member) => member.displayName),
+              })
+              .then((result) => result.text)
+              .catch(() => text)
+              .then((finalText) => {
+                setMinutesText((current) =>
+                  current.trim() === "" ? finalText : `${current}\n${finalText}`,
+                );
+                setInputMode("minutes");
+                // 打开纪要弹窗，让用户先看一眼再处理。
+                setMinutesOpen(true);
+                setNotice("实时记录已填入纪要，检查后点「开始处理」。");
+              });
+          }}
+        />
+      ) : null}
 
       {audioOpen ? (
         <div className="meeting-modal-mask">
@@ -965,6 +1001,9 @@ export function MeetingView({
               </button>
               <button className="secondary-button" type="button" onClick={pickAudio}>
                 <Upload size={16} /> 上传会议录音
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setRealtimeOpen(true)}>
+                <Mic size={16} /> 实时记录
               </button>
               {!online ? <p className="meeting-hint">当前离线：上传后只做本地演示。</p> : null}
             </div>

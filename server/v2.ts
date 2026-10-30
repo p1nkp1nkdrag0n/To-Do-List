@@ -25,6 +25,7 @@ import {
   type DeploymentLockRelease,
 } from "./modules/deployment-lock.js";
 import { CollaborationHub } from "./realtime/collaboration-hub.js";
+import { RealtimeAsrHub } from "./meeting/realtime-hub.js";
 
 export interface V2ServerHandle {
   server: Server;
@@ -135,6 +136,7 @@ export async function startV2Server(
       { staticPath },
     ),
   );
+  const realtimeAsrHub = new RealtimeAsrHub(server, appDependencies);
   collaborationHub = new CollaborationHub(server, appDependencies, {
     lockTtlMs: options.realtimeLockTtlMs,
     sweepIntervalMs: options.realtimeSweepIntervalMs,
@@ -210,6 +212,7 @@ export async function startV2Server(
       try {
         housekeeping.cancel();
         try {
+          await realtimeAsrHub.close();
           await collaborationHub.close();
           await new Promise<void>((resolve, reject) => {
             server.close((error) =>
