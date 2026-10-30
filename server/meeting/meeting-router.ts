@@ -67,6 +67,19 @@ const RunWithMinutesSchema = z
     minutes: z.string().max(20_000).optional(),
     lockOwners: z.boolean().optional(),
     replaceSchedule: z.boolean().optional(),
+    // 确认面板确认过的任务：有这份清单就不再重新抽取。
+    tasks: z
+      .array(
+        z.object({
+          title: z.string().min(1).max(60),
+          ownerName: z.string().min(1),
+          estimatedHours: z.number().positive().max(200),
+          dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+          dependsOnTitle: z.string().max(60).nullish(),
+        }),
+      )
+      .max(60)
+      .optional(),
   })
   .strict();
 
@@ -143,7 +156,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/run",
     asyncRoute(async (request, response) => {
-      const { projectId, minutes, lockOwners, replaceSchedule } = parseRequestBody(
+      const { projectId, minutes, lockOwners, replaceSchedule, tasks } = parseRequestBody(
         RunWithMinutesSchema,
         request,
       );
@@ -163,6 +176,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       controls.set(projectId, control);
       const orchestratorOptions: ConstructorParameters<typeof MeetingOrchestrator>[0] = {
         projectId,
+        confirmedTasks: tasks,
         control,
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
         paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),

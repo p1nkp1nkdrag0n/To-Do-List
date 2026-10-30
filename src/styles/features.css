@@ -1580,3 +1580,77 @@
   font-style: normal;
   font-size: 10.5px;
 }
+
+/* 实时会议：确认任务清单 */
+.realtime-review {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.realtime-review-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.realtime-review-head span {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.realtime-review-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.realtime-review-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.realtime-review-title {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.realtime-review-row select {
+  width: 110px;
+  flex: none;
+}
+
+.realtime-review-row input[type="number"] {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.realtime-review-row input[type="number"] {
+  width: 84px;
+}
+
+.realtime-review-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

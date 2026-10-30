@@ -5,7 +5,7 @@ import type { CollaborationState } from "../../lib/collaboration-state";
 import { api, errorMessage } from "../../lib/api";
 import type { ProjectDetail } from "../../types";
 import { LlmSettings } from "./LlmSettings";
-import { RealtimeWorkspace } from "./RealtimeWorkspace";
+import { RealtimeWorkspace, type ReviewTask } from "./RealtimeWorkspace";
 import {
   DEMO_AUDIO_SECONDS,
   DEMO_TASKS,
@@ -333,7 +333,7 @@ export function MeetingView({
   }, [currentUserId, projectId]);
 
   /** 从粘贴的会议纪要开始：抽任务 → 建库 → 排期 → 修复，全自动。 */
-  const startFromMinutes = useCallback(async (override?: string) => {
+  const startFromMinutes = useCallback(async (override?: string, confirmedTasks?: ReviewTask[]) => {
     const trimmed = (override ?? minutesText).trim();
     if (trimmed === "") return;
     setMinutesOpen(false);
@@ -363,6 +363,7 @@ export function MeetingView({
         minutes: trimmed,
         lockOwners,
         replaceSchedule,
+        ...(confirmedTasks !== undefined && confirmedTasks.length > 0 ? { tasks: confirmedTasks } : {}),
       });
       setRun(result);
       setFreshRun(true);
@@ -639,11 +640,11 @@ export function MeetingView({
           projectId={project.project.id}
           members={project.members.map((member) => member.displayName)}
           onExit={() => setRealtimeMode(false)}
-          onFinish={async (text) => {
+          onFinish={async (text, tasks) => {
             setMinutesText(text);
             setInputMode("minutes");
             setRealtimeMode(false);
-            await startFromMinutes(text);
+            await startFromMinutes(text, tasks);
           }}
         />
       </div>

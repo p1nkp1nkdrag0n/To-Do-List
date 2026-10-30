@@ -43,6 +43,13 @@ export interface OrchestratorOptions {
   actingUserId?: string;
   /** 触发这次处理的用户名；MCP 子进程用它作为执行身份。 */
   actingUserName?: string;
+  /** 确认面板确认过的任务：给了就不再重新抽取。 */
+  confirmedTasks?: Array<{
+    title: string;
+    ownerName: string;
+    estimatedHours: number;
+    dueDate?: string | null;
+  }>;
   /**
    * 纪要解析成功、任务即将创建之前调用（用于「按纪要重建」时清空旧排期）。
    * 解析失败不会调用，所以坏纪要不会提前把旧排期删掉。
@@ -468,8 +475,15 @@ export class MeetingOrchestrator {
       const memberByName = new Map(members.map((member) => [member.displayName, member.userId]));
       const names = [...memberByName.keys()];
 
-      // 2. 抽取
-      const extraction = await extractTasksFromText(minutes, names, this.options.actingUserId);
+      // 2. 抽取：确认面板给了清单就直接用，避免“看到的和建出来的不一样”。
+      const extraction =
+        this.options.confirmedTasks !== undefined
+          ? {
+              tasks: this.options.confirmedTasks,
+              source: "deepseek" as const,
+              warnings: [`按确认面板的 ${this.options.confirmedTasks.length} 条任务建排期，未重新抽取。`],
+            }
+          : await extractTasksFromText(minutes, names, this.options.actingUserId);
       extractionWarnings = extraction.warnings;
       this.emit({
         type: "tool.call",

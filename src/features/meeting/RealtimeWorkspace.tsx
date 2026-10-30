@@ -16,11 +16,18 @@ interface DraftTask {
   ownerConfidence?: number;
 }
 
+export interface ReviewTask {
+  title: string;
+  ownerName: string;
+  estimatedHours: number;
+  dueDate: string | null;
+}
+
 interface RealtimeWorkspaceProps {
   projectId: string;
   members: string[];
   onExit: () => void;
-  onFinish: (text: string) => Promise<void> | void;
+  onFinish: (text: string, tasks: ReviewTask[]) => Promise<void> | void;
 }
 
 export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: RealtimeWorkspaceProps) {
@@ -34,6 +41,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
   const [drafting, setDrafting] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [finishing, setFinishing] = useState(false);
+  const [review, setReview] = useState<{ text: string; tasks: ReviewTask[] } | null>(null);
   const draftTimer = useRef<number | undefined>(undefined);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const correctedCount = useRef(0);
@@ -116,7 +124,16 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
         .post<{ text: string }>("/api/meeting/correct", { text: transcript })
         .then((result) => result.text)
         .catch(() => transcript);
-      await onFinish(corrected);
+      // 先按最终文本抽一份任务清单，让用户确认后再建排期。
+      const draft = await api
+        .post<{ tasks: ReviewTask[] }>("/api/meeting/draft", { projectId, minutes: corrected })
+        .then((result) => result.tasks)
+        .catch(() => []);
+      if (draft.length === 0) {
+        await onFinish(corrected, []);
+        return;
+      }
+      setReview({ text: corrected, tasks: draft });
     } finally {
       setFinishing(false);
     }
@@ -186,6 +203,78 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
       ) : null}
       {error !== "" ? <p className="form-error">{error}</p> : null}
 
+      {review !== null ? (
+        <div className="realtime-review">
+          <div className="realtime-review-head">
+            <strong>确认任务清单</strong>
+            <span>确认后会按这份清单建排期，不会重新抽取</span>
+          </div>
+          <div className="realtime-review-list">
+            {review.tasks.map((task, index) => (
+              <div className="realtime-review-row" key={`${task.title}-${index}`}>
+                <input
+                  className="realtime-review-title"
+                  value={task.title}
+                  onChange={(event) => {
+                    const next = { ...review, tasks: [...review.tasks] };
+                    next.tasks[index] = { ...task, title: event.target.value };
+                    setReview(next);
+                  }}
+                />
+                <select
+                  value={task.ownerName}
+                  onChange={(event) => {
+                    const next = { ...review, tasks: [...review.tasks] };
+                    next.tasks[index] = { ...task, ownerName: event.target.value };
+                    setReview(next);
+                  }}
+                >
+                  <option value="未分配">未分配</option>
+                  {members.map((member) => (
+                    <option key={member} value={member}>
+                      {member}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={0.5}
+                  step={0.5}
+                  value={task.estimatedHours}
+                  onChange={(event) => {
+                    const next = { ...review, tasks: [...review.tasks] };
+                    next.tasks[index] = { ...task, estimatedHours: Number(event.target.value) };
+                    setReview(next);
+                  }}
+                />
+                <button
+                  className="link-button"
+                  type="button"
+                  onClick={() => {
+                    const next = { ...review, tasks: review.tasks.filter((_, position) => position !== index) };
+                    setReview(next);
+                  }}
+                >
+                  删除
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="realtime-review-foot">
+            <button className="secondary-button" type="button" onClick={() => setReview(null)}>
+              返回修改字幕
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              disabled={review.tasks.length === 0}
+              onClick={() => void onFinish(review.text, review.tasks)}
+            >
+              确认并生成排期
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="realtime-split">
         <div className="realtime-transcript" ref={transcriptRef}>
           {lines.length === 0 && partial === "" ? (
@@ -225,6 +314,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
           ))}
         </aside>
       </div>
+      )}
 
       <footer className="realtime-foot">
         <span className="realtime-hint">
