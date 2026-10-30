@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  AudioLines,
   BookOpen,
   CalendarClock,
   KeyRound,
@@ -19,6 +20,7 @@ type SectionId =
   | "minutes"
   | "key"
   | "voice"
+  | "live"
   | "availability"
   | "network"
   | "data"
@@ -34,6 +36,7 @@ const SECTIONS: Array<{
   { id: "minutes", title: "会议纪要怎么写", icon: BookOpen },
   { id: "key", title: "配置大模型 Key", icon: KeyRound },
   { id: "voice", title: "录音转写（思必驰）", icon: Mic },
+  { id: "live", title: "实时会议（边说边出任务）", icon: AudioLines },
   { id: "availability", title: "可用时间与容量", icon: CalendarClock },
   { id: "network", title: "手机与局域网访问", icon: Wifi },
   { id: "data", title: "数据、备份与卸载", icon: ShieldCheck },
@@ -228,6 +231,68 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
               <p className="help-note">
                 IP 白名单绑定调用方公网 IP：换网络（比如去比赛场地）后，要回控制台把新 IP 加进去，
                 或者直接填 0.0.0.0/0 不做限制。
+              </p>
+            </section>
+          ) : null}
+
+          {active === "live" ? (
+            <section>
+              <h3>实时会议（边说边出任务）</h3>
+              <p>
+                会议页点「实时记录」，对着麦克风说话，1–2 秒后字幕出现在左边；
+                右边的「AI 任务草稿」会随着你说的话逐条冒出来。说完点「结束并生成排期」，
+                会自动纠正人名、抽任务、建排期，直接进甘特图。
+              </p>
+
+              <h4>用之前要准备什么</h4>
+              <ol className="help-steps">
+                <li>
+                  <b>思必驰实时长语音转写</b>
+                  <p>
+                    这是和「录音文件转写」分开的服务：DUI 控制台创建产品时勾选
+                    「实时长语音转写」，并购买时长套餐（没有额度会返回 120100）。
+                  </p>
+                </li>
+                <li>
+                  <b>填 productId + apiKey</b>
+                  <p>会议页「手动 → AI 设置 → 语音转写」填好，点「测试连接」确认鉴权通过。</p>
+                </li>
+                <li>
+                  <b>用 Chrome 打开</b>
+                  <p>
+                    浏览器麦克风只在 <code>127.0.0.1</code> 或 HTTPS 下可用；
+                    局域网 IP（如 192.168.x.x）会被浏览器禁用。
+                  </p>
+                </li>
+              </ol>
+
+              <h4>怎么用</h4>
+              <ol className="help-steps">
+                <li><b>选麦克风</b><p>右上角下拉框选「麦克风阵列」或系统默认；选错设备会出现「没有声音」。</p></li>
+                <li><b>开始说话</b><p>正常音量，一次说完整句子；左边的字会一直累积，可以往上翻。</p></li>
+                <li><b>看草稿</b><p>右边的任务草稿按标题去重，不会覆盖之前的结果。</p></li>
+                <li><b>结束并生成排期</b><p>自动纠错人名（如把「叶恒」改成「邱业恒」）并进入现有的排期流程。</p></li>
+              </ol>
+
+              <h4>常见问题</h4>
+              <table className="help-table">
+                <thead><tr><th>现象</th><th>原因 / 处理</th></tr></thead>
+                <tbody>
+                  <tr><td>麦克风条有声音，但没有字幕</td><td>先换 Chrome；Edge 会把部分阵列麦克风处理成低频噪声</td></tr>
+                  <tr><td>麦克风条一直是「没有声音」</td><td>系统输入设备选错，或麦克风被静音；到 Windows 声音设置里换设备</td></tr>
+                  <tr><td>字幕一直不出来</td><td>实时服务没开通/没额度；到控制台看服务授权和剩余时长</td></tr>
+                  <tr><td>任务草稿是空的</td><td>说的内容里没有「谁 + 做什么 + 多久」；补上负责人和工时</td></tr>
+                  <tr><td>点结束没有反应</td><td>一句话都没识别出来时按钮不可用；先说几句再结束</td></tr>
+                </tbody>
+              </table>
+
+              <h4>和「上传录音」怎么选</h4>
+              <p>
+                实时会议适合现场演示和短会；已经有录音文件时用「上传会议录音」更稳。
+                实时接口出问题时，随时可以退回上传录音，后续抽任务和排期完全一样。
+              </p>
+              <p className="help-note">
+                实时字幕约 1–2 秒延迟，不是毫秒级；长会议建议每 10–15 分钟点一次「结束并生成排期」。
               </p>
             </section>
           ) : null}
