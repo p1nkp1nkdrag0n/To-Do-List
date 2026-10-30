@@ -1569,3 +1569,14 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+.realtime-draft-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #fef3c7;
+  color: #b45309;
+  font-style: normal;
+  font-size: 10.5px;
+}

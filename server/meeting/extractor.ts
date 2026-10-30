@@ -21,6 +21,12 @@ export const ExtractedTaskSchema = z.object({
     .nullish(),
   dependsOnTitle: z.string().max(60).nullish(),
   sourceQuote: z.string().max(200).nullish(),
+  /** 负责人是怎么定下来的：explicit=原文写了名字，pronoun=代词按上下文推断，unknown=没定。 */
+  ownerBasis: z.enum(["explicit", "pronoun", "unknown"]).optional(),
+  /** 0–1；推断出来的负责人必须给。 */
+  ownerConfidence: z.number().min(0).max(1).optional(),
+  /** 一句话说明推断依据，给用户核对。 */
+  ownerReason: z.string().max(60).optional(),
 });
 
 export const ExtractionSchema = z.object({
@@ -43,7 +49,8 @@ const SYSTEM_PROMPT = [
   "2. ownerName 优先用成员名单里的写法：如果原文的名字与某个成员同音或只差一两个字（例如「秋叶恒」和「邱业恒」），把它改写成名单里的写法。",
   "2.0 如果确实找不到对应成员，再照原文写；不要换成名单里毫不相干的人。",
   "2.1 如果纪要只是记录「改了什么」，没有写明谁来做，ownerName 填「未分配」，**不要因此省略这条任务**。",
-  "2.2 代词解析：我/我们 → 只有在纪要里能看出说话人（「发言人N：」「名字：」或自我介绍「我是X」）时才用对应成员；看不出是谁就填「未分配」，不要猜。你/你们 → 句子里被称呼的人。他/她/他们 → 只有上下文能明确指向某个成员时才用，否则填「未分配」。",
+  "2.2 代词解析：允许根据上下文推断负责人。我/我们 → 说话人（「发言人N：」「名字：」或自我介绍「我是X」）；如果上一句是别人在安排、这一句是回应承接（如「好，我来做」），说话人就是回应的人。你/你们 → 句子里被称呼的人，或上一句正在被交代的人。他/她/他们 → 上下文里唯一指向的成员（排除说话人）；有多个候选就填「未分配」。",
+  "2.2.1 推断时必须在 ownerBasis 里写 pronoun，ownerConfidence 给 0–1，ownerReason 用不超过 40 字写依据（例如「乙回应『我来做』」）；低于 0.5 的推断请直接填「未分配」。原文直接写了名字时 ownerBasis=explicit。",
   "2.3 口语化表达要转成可执行的任务：「弄一下 / 搞定 / 盯一下 / 收个尾」写成具体动作（例如「完成演示稿」「跟进甘特图」）；工时按原话数字，没有就不写；日期没说就填 null，不要猜。",
   "3. estimatedHours 用数字，单位小时；没说工时就按同类任务估一个合理值（4~8）。",
   "4. dueDate 必须是 YYYY-MM-DD；根据今天的日期和纪要里的「这周」「下周三」「周末」等说法换算。纪要没说时间就填 null，不要猜成今天。",
@@ -160,11 +167,37 @@ export async function extractTasksFromText(
           `纪要较长，这次只取了前 ${CAP} 条任务（模型返回 ${parsed.tasks.length} 条）。`,
         );
       }
-      const unassigned = capped.filter((task) => task.ownerName === "未分配");
-      const unknown = capped.filter(
+      // 置信度太低的推断不可靠，降级为未分配；其余推断在 warnings 里列出来让用户核对。
+      const resolved = capped.map((task) => {
+        if (
+          task.ownerName !== "未分配" &&
+          task.ownerBasis === "pronoun" &&
+          (task.ownerConfidence ?? 0) < 0.5
+        ) {
+          return { ...task, ownerName: "未分配", ownerBasis: "unknown" as const };
+        }
+        return task;
+      });
+      const inferred = resolved.filter(
+        (task) => task.ownerBasis === "pronoun" && task.ownerName !== "未分配",
+      );
+      if (inferred.length > 0) {
+        const examples = inferred
+          .slice(0, 3)
+          .map(
+            (task) =>
+              `「${task.title}」→ ${task.ownerName}${task.ownerReason !== undefined ? `（${task.ownerReason}）` : ""}`,
+          )
+          .join("；");
+        warnings.push(
+          `有 ${inferred.length} 条任务的负责人是根据上下文推断的：${examples}。请在排期前核对。`,
+        );
+      }
+      const unassigned = resolved.filter((task) => task.ownerName === "未分配");
+      const unknown = resolved.filter(
         (task) => task.ownerName !== "未分配" && !memberNames.includes(task.ownerName),
       );
-      const valid = capped.filter(
+      const valid = resolved.filter(
         (task) => task.ownerName === "未分配" || memberNames.includes(task.ownerName),
       );
       if (unknown.length > 0) {

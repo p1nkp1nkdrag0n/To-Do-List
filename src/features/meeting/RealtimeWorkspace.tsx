@@ -12,6 +12,8 @@ interface DraftTask {
   ownerName: string;
   estimatedHours: number;
   dueDate: string | null;
+  ownerBasis?: "explicit" | "pronoun" | "unknown";
+  ownerConfidence?: number;
 }
 
 interface RealtimeWorkspaceProps {
@@ -212,7 +214,12 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
             <div key={`${draft.title}-${index}`} className="realtime-draft">
               <strong>{draft.title}</strong>
               <span>
-                {draft.ownerName} · {draft.estimatedHours}h{draft.dueDate !== null ? ` · ${draft.dueDate}` : ""}
+                {draft.ownerName}
+                {draft.ownerBasis === "pronoun" && (draft.ownerConfidence ?? 0) >= 0.5 ? (
+                  <i className="realtime-draft-badge">推断</i>
+                ) : null}
+                {" · "}
+                {draft.estimatedHours}h{draft.dueDate !== null ? ` · ${draft.dueDate}` : ""}
               </span>
             </div>
           ))}
