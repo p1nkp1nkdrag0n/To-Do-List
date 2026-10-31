@@ -313,7 +313,7 @@ afterEach(async () => {
 });
 
 describe("MCP 只读工具", () => {
-  it("tools/list 暴露全部 10 个工具", async () => {
+  it("tools/list 暴露全部 11 个工具", async () => {
     const fixture = makeFixture();
     const { client } = await connectTo(fixture);
 
@@ -329,6 +329,7 @@ describe("MCP 只读工具", () => {
         "list_members",
         "list_projects",
         "plan_reschedule",
+        "replace_schedule",
         "set_dependency",
       ].sort(),
     );

@@ -9,6 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import type { ScheduleConflict } from "../../shared/availability-contracts.js";
+import { CommitMeetingTasksRequestSchema } from "../../shared/schedule-contracts.js";
 import { applyPlan } from "./apply-plan.js";
 import { planReschedules } from "./reschedule.js";
 import type { McpRuntime } from "./runtime.js";
@@ -459,6 +460,55 @@ export function registerTools(server: McpServer, runtime: McpRuntime): void {
           predecessorTaskId,
           successorTaskId,
           summary: `已建立依赖：${predecessorTaskId} → ${successorTaskId}。`,
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "replace_schedule",
+    {
+      title: "整批提交会议任务",
+      description:
+        "会议到排期的唯一批量写入口：在一个短事务里校验版本/成员/归档，可选删除旧排期，再创建全部任务、分工与依赖。任一步失败整体回滚。",
+      inputSchema: {
+        projectId: ProjectIdArgument,
+        expectedScheduleRevision: z.number().int().positive().describe("用户确认或抽取开始时的排期版本"),
+        replaceSchedule: z.boolean().describe("true 表示删旧建新；false 表示追加"),
+        tasks: z
+          .array(
+            z.object({
+              clientTaskId: z.string().min(1).describe("候选任务稳定 ID，仅用于本次提交内建依赖"),
+              title: z.string().min(1).max(200),
+              ownerUserId: z.string().min(1).nullable(),
+              estimatedMinutes: z.number().int().min(0).max(20_000),
+              startDate: z.string().min(1),
+              dueDate: z.string().min(1),
+              predecessorClientTaskIds: z.array(z.string().min(1)).default([]),
+            }),
+          )
+          .min(1)
+          .max(200),
+      },
+    },
+    async ({ projectId, expectedScheduleRevision, replaceSchedule, tasks }) => {
+      try {
+        const resolved = runtime.resolveProjectId(projectId);
+        const request = CommitMeetingTasksRequestSchema.parse({
+          projectId: resolved,
+          expectedScheduleRevision,
+          replaceSchedule,
+          tasks,
+        });
+        const result = runtime.schedule.commitMeetingTasks(runtime.auth, resolved, request);
+        return jsonResult({
+          projectId: resolved,
+          taskIds: result.taskIds,
+          scheduleRevision: result.scheduleRevision,
+          count: result.taskIds.length,
+          summary: `已在一个事务内提交 ${result.taskIds.length} 条任务（${replaceSchedule ? "替换旧排期" : "追加"}）。`,
         });
       } catch (error) {
         return failure(error);
