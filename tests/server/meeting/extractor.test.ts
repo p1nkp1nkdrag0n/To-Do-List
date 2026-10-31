@@ -78,4 +78,17 @@ describe("会议纪要规则解析", () => {
     expect(tasks[0]!.title).toBe("整理演示稿");
   });
 
+
+  it("标题里的「24 小时制」不能被当成末尾工时后缀", () => {
+    const tasks = extractWithRules("甲负责实现24小时制时钟，预计2小时。", ["甲"]);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.title).toBe("实现24小时制时钟");
+    expect(tasks[0]!.estimatedHours).toBe(2);
+  });
+
+  it("普通「实现登录，预计2小时」仍然去掉工时后缀", () => {
+    const tasks = extractWithRules("甲负责实现登录，预计2小时。", ["甲"]);
+    expect(tasks[0]!.title).toBe("实现登录");
+  });
+
 });

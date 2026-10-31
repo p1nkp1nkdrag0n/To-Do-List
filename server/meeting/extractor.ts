@@ -84,9 +84,16 @@ function chineseNumber(value: string): number | null {
 }
 
 function hoursFrom(text: string): number | null {
-  const match = text.match(/(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H)/);
-  if (match === null) return null;
-  const value = chineseNumber(match[1]!);
+  const pattern = /(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H)/gu;
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length === 0) return null;
+  // 「实现24小时制时钟，预计2小时」里有两个数字：优先取带“预计/耗时/需要”或分隔符的那个。
+  const effort = matches.find((match) => {
+    const prefix = text.slice(0, match.index);
+    return /(预计|耗时|需要|大约|大概|约|[，,、；;])\s*$/u.test(prefix);
+  });
+  const chosen = effort ?? matches[matches.length - 1]!;
+  const value = chineseNumber(chosen[1]!);
   if (value === null || !Number.isFinite(value) || value <= 0 || value > 200) return null;
   return value;
 }
@@ -131,8 +138,12 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
       .trim();
     title = title.split(/[，,。；;]/)[0]!.trim();
     title = title.replace(/(我来接|我来做|我来写|我来调|我来|负责).*$/, "").trim();
+    // 只清理“明确的末尾工时后缀”，不要把标题正文里的“24 小时制”当成工时。
     title = title
-      .replace(/(需要|要)?\s*(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H).*$/u, "")
+      .replace(
+        /(?:(?:[，,、；;]\s*|\s+)(?:(?:预计|耗时|需要|大约|大概|约)\s*)?|(?:预计|耗时|需要|大约|大概|约)\s*)(?:\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H)\s*$/u,
+        "",
+      )
       .trim();
     if (title.length < 2) continue;
     if (title.length > 30) title = `${title.slice(0, 30)}…`;
