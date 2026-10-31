@@ -21,9 +21,7 @@ namespace ToDoListLauncher
 
                 // 临时文件不能放 %TEMP%：有些机器连用户目录都写不了。
                 // 放到「程序目录的同级」，那里刚刚验证过可写。
-                string tempZip = Path.Combine(
-                    extractionRoot,
-                    "p-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".zip");
+                string tempZip = "";
                 using (Stream payload = Assembly.GetExecutingAssembly()
                     .GetManifestResourceStream("payload.zip"))
                 {
@@ -43,16 +41,55 @@ namespace ToDoListLauncher
                             ? "首次运行：正在解压程序文件（约 1 分钟，只需一次）…"
                             : "检测到新版本：正在更新程序文件（数据不受影响）…");
                         payload.Position = 0;
-                        using (FileStream zipFile = File.Create(tempZip))
+                        for (int attempt = 0; attempt < 8 && tempZip.Length == 0; attempt += 1)
                         {
-                            payload.CopyTo(zipFile);
+                            string candidate = Path.Combine(
+                                extractionRoot,
+                                "p-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".zip");
+                            try
+                            {
+                                using (FileStream zipFile = new FileStream(
+                                    candidate, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                                {
+                                    payload.Position = 0;
+                                    payload.CopyTo(zipFile);
+                                }
+                                tempZip = candidate;
+                            }
+                            catch (IOException)
+                            {
+                                // 同名残留：换名字重试，绝不覆盖。
+                            }
                         }
-                        // staging 也必须在短目录下：target + ".staging-" + 32 位 GUID 会再次超限。
-                        string staging = Path.Combine(
-                            extractionRoot,
-                            "s-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+                        if (tempZip.Length == 0)
+                            throw new Exception("无法创建临时压缩包（同名残留过多），请清理程序目录后重试。");
+                        string staging = "";
+                        for (int attempt = 0; attempt < 8 && staging.Length == 0; attempt += 1)
+                        {
+                            string candidate = Path.Combine(
+                                extractionRoot,
+                                "s-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+                            if (Directory.Exists(candidate) || File.Exists(candidate)) continue;
+                            try
+                            {
+                                Directory.CreateDirectory(candidate);
+                            }
+                            catch (IOException)
+                            {
+                                continue;
+                            }
+                            FileAttributes attributes = File.GetAttributes(candidate);
+                            if ((attributes & FileAttributes.ReparsePoint) != 0 ||
+                                Directory.GetFileSystemEntries(candidate).Length != 0)
+                            {
+                                // 不是本次独占创建的空目录：拒绝使用，也绝不删除。
+                                continue;
+                            }
+                            staging = candidate;
+                        }
+                        if (staging.Length == 0)
+                            throw new Exception("无法创建独占的临时解压目录（同名残留过多），请清理程序目录后重试。");
                         Console.WriteLine("[stage] staging=" + staging + " len=" + staging.Length);
-                        Directory.CreateDirectory(staging);
                         int count;
                         try
                         {
@@ -74,6 +111,7 @@ namespace ToDoListLauncher
                         catch
                         {
                             if (Directory.Exists(staging)) Directory.Delete(staging, true);
+                            if (File.Exists(tempZip)) File.Delete(tempZip);
                             throw;
                         }
                         Console.WriteLine("准备完成（解压 " + count + " 个文件）。");

@@ -20,19 +20,48 @@ const mcpEntry = path.join(appRoot, "dist-server", "server", "mcp", "main.js");
 
 const programRoot = path.resolve(here, "..");
 let dataRoot;
-try {
+if (process.env.TODOLIST_DATA_ROOT) {
+  // 显式配置错误（绝对路径、迁移锁、不可写）必须直接停止，不能回退到另一份库。
   dataRoot = pickDataRoot({ programRoot });
-} catch (error) {
-  // AppData 被权限/组策略禁用时，回退到 exe 同级持久目录；旧数据检测仍会执行，
-  // 不会因为回退就静默打开另一份空库。
+} else {
   const exeDir = process.env.TODOLIST_EXE_DIR;
-  if (!exeDir) throw error;
-  const fallback = path.join(exeDir, "ToDoList-data");
-  dataRoot = pickDataRoot({
-    programRoot,
-    env: { ...process.env, TODOLIST_DATA_ROOT: fallback },
-  });
-  console.log("AppData 不可写，改用 exe 同级数据目录：" + dataRoot);
+  const pointer = exeDir ? path.join(exeDir, "todolist-data-root.txt") : undefined;
+  if (pointer && fs.existsSync(pointer)) {
+    // 上次确认过的持久目录；之后不可用要报错，不能自动换库。
+    const saved = fs.readFileSync(pointer, "utf8").trim();
+    dataRoot = pickDataRoot({
+      programRoot,
+      env: { ...process.env, TODOLIST_DATA_ROOT: saved },
+    });
+  } else {
+    try {
+      dataRoot = pickDataRoot({ programRoot });
+    } catch (error) {
+      const code = error?.code ?? "";
+      if (!["EPERM", "EACCES", "EROFS"].includes(code)) throw error;
+      const defaultRoot = path.join(
+        process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+        "ToDoList",
+      );
+      if (fs.existsSync(defaultRoot)) {
+        throw new Error(
+          "默认数据目录存在但当前不可访问，已停止启动，避免打开另一份空库：" + defaultRoot,
+        );
+      }
+      if (!exeDir) throw error;
+      const fallback = path.join(exeDir, "ToDoList-data");
+      dataRoot = pickDataRoot({
+        programRoot,
+        env: { ...process.env, TODOLIST_DATA_ROOT: fallback },
+      });
+      try {
+        fs.writeFileSync(pointer, fallback, { flag: "wx", mode: 0o600 });
+      } catch {
+        // 写不了指针文件时仍然使用本次目录，但下一次会重新判断。
+      }
+      console.log("AppData 不可写，已明确改用 exe 同级数据目录：" + dataRoot);
+    }
+  }
 }
 // Do not silently open an empty database when a previous unsafe fallback exists.
 if (!process.env.TODOLIST_MIGRATE_FROM) {
