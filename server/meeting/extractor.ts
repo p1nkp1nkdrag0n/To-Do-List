@@ -48,6 +48,7 @@ const SYSTEM_PROMPT = [
   "1. 每个任务一句话，不超过 20 个汉字，动词开头，例如「完成接口联调」。",
   "2. ownerName 优先用成员名单里的写法：如果原文的名字与某个成员同音或只差一两个字（例如「秋叶恒」和「邱业恒」），把它改写成名单里的写法。",
   "2.0 如果确实找不到对应成员，再照原文写；不要换成名单里毫不相干的人。",
+  "2.0.1 原文写了「X 负责……」但 X 不在成员名单时，ownerName 填「未分配」，任务必须保留，ownerReason 写「原文负责人不在成员名单」。",
   "2.1 如果纪要只是记录「改了什么」，没有写明谁来做，ownerName 填「未分配」，**不要因此省略这条任务**。",
   "2.2 代词解析：允许根据上下文推断负责人。我/我们 → 说话人（「发言人N：」「名字：」或自我介绍「我是X」）；如果上一句是别人在安排、这一句是回应承接（如「好，我来做」），说话人就是回应的人。你/你们 → 句子里被称呼的人，或上一句正在被交代的人。他/她/他们 → 上下文里唯一指向的成员（排除说话人）；有多个候选就填「未分配」。",
   "2.2.1 推断时必须在 ownerBasis 里写 pronoun，ownerConfidence 给 0–1，ownerReason 用不超过 40 字写依据（例如「乙回应『我来做』」）；低于 0.5 的推断请直接填「未分配」。原文直接写了名字时 ownerBasis=explicit。",
@@ -104,7 +105,6 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
       (name) => line.startsWith(`${name}：`) || line.startsWith(`${name}:`) || line.startsWith(name),
     );
     const owner = speaker ?? memberNames.find((name) => line.includes(name));
-    if (owner === undefined) continue;
     const hours = hoursFrom(line);
     if (hours === null) continue;
 
@@ -112,7 +112,17 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
     //   甲：订营地，2 小时
     //   甲负责订营地，2 小时
     //   订营地由甲负责，2 小时
-    let title = line.split(owner).join(" ");
+    let ownerName = owner;
+    let title: string;
+    if (owner !== undefined) {
+      title = line.split(owner).join(" ");
+    } else {
+      // 语音把人名听错时，负责人可能不在名单里；任务本身仍要保留为「未分配」。
+      const explicit = line.match(/^(.{1,12}?)(负责|来做|完成|跟进|牵头|处理)/);
+      if (explicit === null) continue;
+      ownerName = "未分配";
+      title = line.slice(explicit[0].length);
+    }
     title = title
       .replace(/^[\s:：,，\-、]+/, "")
       .replace(/^(负责|来做|做|完成|处理|跟进|牵头)[\s:：,，]*/, "")
@@ -121,12 +131,15 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
       .trim();
     title = title.split(/[，,。；;]/)[0]!.trim();
     title = title.replace(/(我来接|我来做|我来写|我来调|我来|负责).*$/, "").trim();
+    title = title
+      .replace(/(需要|要)?\s*(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H).*$/u, "")
+      .trim();
     if (title.length < 2) continue;
     if (title.length > 30) title = `${title.slice(0, 30)}…`;
 
     tasks.push({
       title,
-      ownerName: owner,
+      ownerName: ownerName ?? "未分配",
       estimatedHours: hours,
       dueDate: null,
       dependsOnTitle: null,

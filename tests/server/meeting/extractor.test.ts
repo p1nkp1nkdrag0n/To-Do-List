@@ -70,4 +70,12 @@ describe("会议纪要规则解析", () => {
       expect(task.title).not.toContain("我来");
     }
   });
+
+  it("负责人被听错、不在名单时，任务保留为未分配", () => {
+    const tasks = extractWithRules("玖魇桁负责整理演示稿需要2小时。", MEMBERS);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ ownerName: "未分配", estimatedHours: 2 });
+    expect(tasks[0]!.title).toBe("整理演示稿");
+  });
+
 });
