@@ -164,7 +164,8 @@ async function main() {
   child.stderr.on("data", (chunk) => process.stderr.write(String(chunk)));
 
   const localUrl = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 30_000;
+  // 首次运行要解压一万多个文件，30 秒不够；给足 2 分钟。
+  const deadline = Date.now() + 120_000;
   let ready = false;
   while (Date.now() < deadline) {
     try {
@@ -180,7 +181,7 @@ async function main() {
   }
 
   if (!ready) {
-    console.error("\n服务 30 秒内没有就绪，请把上面的报错发给我。");
+    console.error("\n服务 120 秒内没有就绪，请把上面的报错发给我。");
     child.kill();
     process.exit(1);
   }
