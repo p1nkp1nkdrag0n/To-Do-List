@@ -80,6 +80,18 @@ export function applyPlan(
   // 方案里的「拆分」会给新分工起一个占位 id，后续动作可能又要对它再拆一次。
   // 维护占位 id → 真实 id 的映射，落库时先翻译再执行。
   const placeholderToReal = new Map<string, string>();
+  const afterRevisions: ApplyResult["afterRevisions"] = { tasks: {}, participants: {} };
+
+  const captureRevisions = (taskIds: Set<string>, participantIds: Set<string>): void => {
+    for (const task of runtime.schedule.listTasks(auth, projectId)) {
+      if (taskIds.has(task.id)) afterRevisions.tasks[task.id] = task.revision;
+    }
+    for (const participant of runtime.schedule.listParticipants(auth, projectId)) {
+      if (participantIds.has(participant.id)) {
+        afterRevisions.participants[participant.id] = participant.revision;
+      }
+    }
+  };
 
   for (const rawOperation of plan.operations) {
     const operation: PlanOperation =
@@ -98,6 +110,22 @@ export function applyPlan(
           userId: rawOperation.toUserId,
         });
       }
+      const touchedTasks = new Set<string>();
+      const touchedParticipants = new Set<string>();
+      if (operation.kind === "shiftTask") {
+        for (const taskId of operation.taskIds) touchedTasks.add(taskId);
+        for (const participant of runtime.schedule.listParticipants(auth, projectId)) {
+          if (operation.taskIds.includes(participant.taskId)) touchedParticipants.add(participant.id);
+        }
+      } else {
+        touchedTasks.add(operation.taskId);
+        touchedParticipants.add(operation.participantId);
+        if (operation.kind === "split") {
+          const realId = placeholderToReal.get(operation.newParticipantId);
+          if (realId !== undefined) touchedParticipants.add(realId);
+        }
+      }
+      captureRevisions(touchedTasks, touchedParticipants);
     } catch (error) {
       // 失败就整体回滚到应用前的快照：不能把项目留在“改了一半”的状态。
       const message = error instanceof Error ? error.message : String(error);
@@ -111,29 +139,6 @@ export function applyPlan(
   }
 
   dropBackup(runtime);
-  const taskIds = new Set<string>();
-  const participantIds = new Set<string>();
-  for (const operation of plan.operations) {
-    if (operation.kind === "shiftTask") {
-      for (const taskId of operation.taskIds) taskIds.add(taskId);
-    } else {
-      taskIds.add(operation.taskId);
-      participantIds.add(operation.participantId);
-      if (operation.kind === "split") {
-        const realId = placeholderToReal.get(operation.newParticipantId);
-        if (realId !== undefined) participantIds.add(realId);
-      }
-    }
-  }
-  const afterRevisions: ApplyResult["afterRevisions"] = { tasks: {}, participants: {} };
-  for (const task of runtime.schedule.listTasks(runtime.auth, projectId)) {
-    if (taskIds.has(task.id)) afterRevisions.tasks[task.id] = task.revision;
-  }
-  for (const participant of runtime.schedule.listParticipants(runtime.auth, projectId)) {
-    if (participantIds.has(participant.id)) {
-      afterRevisions.participants[participant.id] = participant.revision;
-    }
-  }
   const conflictsAfter = runtime.availability.projectConflicts(projectId);
   return {
     projectId,

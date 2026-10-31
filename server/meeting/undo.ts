@@ -1,17 +1,16 @@
 /**
  * 撤销：把 apply_plan 做过的动作按相反顺序还原。
  *
- * 为什么不需要「快照整个项目」：
- *   方案里的每个动作都自带还原所需的信息（原负责人 / 原结束日 / 平移天数 /
- *   拆出去的那条分工 id），所以逆运算就是逐条反过来做。
+ * 关键约束：版本检查与逆向写入必须在同一个短事务里完成。
+ * 不能在事务外检查、再用服务层逐条写：服务层的 retry 会重读别人刚改的值，
+ * 把“30 分钟”再 +480，得到 510。
  *
- * 注意：撤销走的是服务层（而不是 MCP），因为它是「人在环上」的人工操作，
- * 不属于智能体的自动流程；权限仍然用当前登录用户，没有开后门。
+ * 因此这里直接用事务内 SQL 写入，只接受 apply 时记录的 afterRevisions；
+ * 任一记录已变化或缺少 afterRevisions，整次撤销拒绝，不写任何一条。
  */
 import { HttpError } from "../http/errors.js";
 import type { V2RuntimeDependencies } from "../http/dependencies.js";
 import type { AuthenticatedSession } from "../modules/auth/auth-service.js";
-import { ScheduleService } from "../modules/schedule/schedule-service.js";
 import type { PlanOperation } from "../mcp/reschedule.js";
 import type { AppliedPlanRecord } from "./events.js";
 
@@ -24,23 +23,28 @@ function shift(date: string | null, days: number): string | null {
     .slice(0, 10);
 }
 
-function retry<T>(operation: () => T): T {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      return operation();
-    } catch (error) {
-      lastError = error;
-      if (!(error instanceof HttpError && error.code === "REVISION_CONFLICT")) throw error;
-    }
-  }
-  throw lastError;
-}
-
 export interface UndoResult {
   projectId: string;
   reverted: number;
   skipped: string[];
+}
+
+interface ParticipantRow extends Record<string, unknown> {
+  id: string;
+  task_id: string;
+  user_id: string;
+  start_date: string;
+  end_date: string;
+  estimated_minutes: number;
+  revision: number;
+  removed_at: string | null;
+}
+
+interface TaskRow extends Record<string, unknown> {
+  id: string;
+  start_date: string | null;
+  due_date: string | null;
+  revision: number;
 }
 
 export function undoPlan(
@@ -49,154 +53,172 @@ export function undoPlan(
   projectId: string,
   plan: AppliedPlanRecord,
 ): UndoResult {
-  const schedule = new ScheduleService(dependencies);
-  const skipped: string[] = [];
-  let reverted = 0;
+  const db = dependencies.database;
+  if (plan.afterRevisions === undefined) {
+    return {
+      projectId,
+      reverted: 0,
+      skipped: ["缺少写后版本记录，已安全拒绝撤销，避免覆盖人工修改。"],
+    };
+  }
+  const after = plan.afterRevisions;
 
-  const participants = () =>
-    schedule.listParticipants(auth, projectId);
-  const tasks = () => schedule.listTasks(auth, projectId);
+  try {
+    return db.transaction(() => {
+      const participants = new Map(
+        db
+          .all<ParticipantRow>(
+            "SELECT id, task_id, user_id, start_date, end_date, estimated_minutes, revision, removed_at FROM task_participants WHERE project_id = ?",
+            [projectId],
+          )
+          .map((row) => [row.id, row]),
+      );
+      const tasks = new Map(
+        db
+          .all<TaskRow>(
+            "SELECT id, start_date, due_date, revision FROM tasks WHERE project_id = ? AND deleted_at IS NULL",
+            [projectId],
+          )
+          .map((row) => [row.id, row]),
+      );
 
-  // 先整批检查“是否仍是应用后的状态”，任一条被人工改过就整次拒绝，不写任何一条。
-  if (plan.afterRevisions !== undefined) {
-    const currentTasks = new Map(tasks().map((task) => [task.id, task.revision]));
-    const currentParticipants = new Map(
-      participants().map((participant) => [participant.id, participant.revision]),
-    );
-    const changed: string[] = [];
-    for (const operation of plan.operations) {
-      const expectedTasks = plan.afterRevisions.tasks;
-      const expectedParticipants = plan.afterRevisions.participants;
-      if (operation.kind === "shiftTask") {
-        for (const taskId of operation.taskIds) {
-          if (currentTasks.get(taskId) !== expectedTasks[taskId]) changed.push(`task:${taskId}`);
+      const requireParticipant = (id: string): ParticipantRow => {
+        const row = participants.get(id);
+        if (row === undefined || row.removed_at !== null) {
+          throw new HttpError(409, "UNDO_STALE", "分工已被删除或修改，已拒绝撤销。");
         }
-      } else {
-        if (currentParticipants.get(operation.participantId) !== expectedParticipants[operation.participantId]) {
-          changed.push(`participant:${operation.participantId}`);
+        if (after.participants[id] !== row.revision) {
+          throw new HttpError(409, "UNDO_STALE", "分工已被人工修改，已拒绝撤销。");
         }
-        if (currentTasks.get(operation.taskId) !== expectedTasks[operation.taskId]) {
-          changed.push(`task:${operation.taskId}`);
+        return row;
+      };
+      const requireTask = (id: string): TaskRow => {
+        const row = tasks.get(id);
+        if (row === undefined) throw new HttpError(409, "UNDO_STALE", "任务已被删除，已拒绝撤销。");
+        if (after.tasks[id] !== row.revision) {
+          throw new HttpError(409, "UNDO_STALE", "任务已被人工修改，已拒绝撤销。");
         }
-        if (operation.kind === "split") {
-          const mapping = (plan.createdParticipants ?? []).find(
-            (item) => item.placeholderId === operation.newParticipantId,
-          );
-          const realId = mapping?.realId ?? operation.newParticipantId;
-          if (currentParticipants.get(realId) !== expectedParticipants[realId]) {
-            changed.push(`participant:${realId}`);
+        return row;
+      };
+      const updateParticipant = (
+        row: ParticipantRow,
+        fields: { userId?: string; startDate?: string; endDate?: string; estimatedMinutes?: number },
+      ) => {
+        const changed = db.run(
+          `UPDATE task_participants
+              SET user_id = ?, start_date = ?, end_date = ?, estimated_minutes = ?,
+                  updated_by = ?, updated_at = ?, revision = revision + 1
+            WHERE id = ? AND project_id = ? AND revision = ?`,
+          [
+            fields.userId ?? row.user_id,
+            fields.startDate ?? row.start_date,
+            fields.endDate ?? row.end_date,
+            fields.estimatedMinutes ?? row.estimated_minutes,
+            auth.user.id,
+            new Date().toISOString(),
+            row.id,
+            projectId,
+            row.revision,
+          ],
+        );
+        if (changed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "分工写入冲突，已拒绝撤销。");
+      };
+      const updateTask = (row: TaskRow, startDate: string | null, dueDate: string | null) => {
+        const changed = db.run(
+          `UPDATE tasks
+              SET start_date = ?, due_date = ?, updated_by = ?, updated_at = ?, revision = revision + 1
+            WHERE id = ? AND project_id = ? AND revision = ?`,
+          [startDate, dueDate, auth.user.id, new Date().toISOString(), row.id, projectId, row.revision],
+        );
+        if (changed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "任务写入冲突，已拒绝撤销。");
+      };
+
+      let reverted = 0;
+      for (const operation of [...plan.operations].reverse()) {
+        switch (operation.kind) {
+          case "split": {
+            const mapping = (plan.createdParticipants ?? []).find(
+              (item) => item.placeholderId === operation.newParticipantId,
+            );
+            const createdId = mapping?.realId ?? operation.newParticipantId;
+            const created = participants.get(createdId);
+            if (created === undefined || created.removed_at !== null) {
+              throw new HttpError(409, "UNDO_STALE", "拆出的分工已被删除，已拒绝撤销。");
+            }
+            if (after.participants[createdId] !== created.revision) {
+              throw new HttpError(409, "UNDO_STALE", "拆出的分工已被人工修改，已拒绝撤销。");
+            }
+            const removed = db.run(
+              "UPDATE task_participants SET removed_at = ?, removed_by = ?, updated_by = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND project_id = ? AND revision = ? AND removed_at IS NULL",
+              [
+                new Date().toISOString(),
+                auth.user.id,
+                auth.user.id,
+                new Date().toISOString(),
+                created.id,
+                projectId,
+                created.revision,
+              ],
+            );
+            if (removed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "拆出的分工状态已变化，已拒绝撤销。");
+            const source = requireParticipant(operation.participantId);
+            updateParticipant(source, {
+              estimatedMinutes: source.estimated_minutes + operation.moveMinutes,
+            });
+            break;
+          }
+          case "reassign": {
+            const participant = requireParticipant(operation.participantId);
+            updateParticipant(participant, { userId: operation.fromUserId });
+            break;
+          }
+          case "extend": {
+            const participant = requireParticipant(operation.participantId);
+            updateParticipant(participant, { endDate: operation.previousEndDate });
+            const task = requireTask(operation.taskId);
+            updateTask(
+              task,
+              task.start_date,
+              operation.previousTaskDueDate ?? operation.previousEndDate,
+            );
+            break;
+          }
+          case "shiftTask": {
+            for (const taskId of operation.taskIds) {
+              const task = requireTask(taskId);
+              updateTask(
+                task,
+                shift(task.start_date, -operation.days),
+                shift(task.due_date, -operation.days),
+              );
+            }
+            for (const row of [...participants.values()].filter((item) =>
+              operation.taskIds.includes(item.task_id),
+            )) {
+              if (row.removed_at !== null) continue;
+              const current = requireParticipant(row.id);
+              updateParticipant(current, {
+                startDate: shift(current.start_date, -operation.days) ?? current.start_date,
+                endDate: shift(current.end_date, -operation.days) ?? current.end_date,
+              });
+            }
+            break;
           }
         }
+        reverted += 1;
       }
-    }
-    if (changed.length > 0) {
-      return {
-        projectId,
-        reverted: 0,
-        skipped: [
-          `撤销已取消：${[...new Set(changed)].join("、")} 已被人工修改，` +
-            "为避免覆盖你的修改，本次未撤销任何一条。",
-        ],
-      };
-    }
-  }
 
-  for (const operation of [...plan.operations].reverse()) {
-    try {
-      revert(operation);
-      reverted += 1;
-    } catch (error) {
-      skipped.push(
-        `${operation.kind}: ${error instanceof Error ? error.message : String(error)}`,
+      db.run(
+        "UPDATE projects SET schedule_revision = schedule_revision + 1 WHERE id = ? AND deleted_at IS NULL",
+        [projectId],
       );
-    }
-  }
-
-  return { projectId, reverted, skipped };
-
-  function revert(operation: PlanOperation): void {
-    switch (operation.kind) {
-      case "split": {
-        // 先删掉拆出去的那条，再把工时还给原负责人。
-        // 落库时生成的是真实 id，和方案里的占位 id 不同，优先用 apply 回报的映射。
-        const mapping = (plan.createdParticipants ?? []).find(
-          (item) => item.placeholderId === operation.newParticipantId,
-        );
-        const created = participants().find(
-          (item) => item.id === (mapping?.realId ?? operation.newParticipantId),
-        );
-        if (created !== undefined) {
-          retry(() => schedule.deleteParticipant(auth, projectId, created.id, created.revision));
-        }
-        retry(() => {
-          const source = participants().find((item) => item.id === operation.participantId);
-          if (source === undefined) throw new Error("原分工不存在");
-          return schedule.updateParticipant(auth, projectId, source.id, {
-            expectedRevision: source.revision,
-            estimatedMinutes: source.estimatedMinutes + operation.moveMinutes,
-          });
-        });
-        return;
-      }
-      case "reassign": {
-        retry(() => {
-          const participant = participants().find((item) => item.id === operation.participantId);
-          if (participant === undefined) throw new Error("分工不存在");
-          return schedule.updateParticipant(auth, projectId, participant.id, {
-            expectedRevision: participant.revision,
-            userId: operation.fromUserId,
-          });
-        });
-        return;
-      }
-      case "extend": {
-        retry(() => {
-          const participant = participants().find((item) => item.id === operation.participantId);
-          if (participant === undefined) throw new Error("分工不存在");
-          return schedule.updateParticipant(auth, projectId, participant.id, {
-            expectedRevision: participant.revision,
-            endDate: operation.previousEndDate,
-          });
-        });
-        retry(() => {
-          const task = tasks().find((item) => item.id === operation.taskId);
-          if (task === undefined || task.dueDate !== operation.newEndDate) return;
-          return schedule.updateTask(auth, projectId, task.id, {
-            expectedRevision: task.revision,
-            // 旧记录没有 previousTaskDueDate 时退回分工结束日，保持兼容。
-            dueDate: operation.previousTaskDueDate ?? operation.previousEndDate,
-          });
-        });
-        return;
-      }
-      case "shiftTask": {
-        // 整体平移：被连带推走的下游任务也要一起挪回去。
-        for (const taskId of operation.taskIds) {
-          retry(() => {
-            const current = tasks().find((item) => item.id === taskId);
-            if (current === undefined) return;
-            return schedule.updateTask(auth, projectId, current.id, {
-              expectedRevision: current.revision,
-              startDate: shift(current.startDate, -operation.days) ?? current.startDate,
-              dueDate: shift(current.dueDate, -operation.days) ?? current.dueDate,
-            });
-          });
-        }
-        for (const participant of participants().filter((item) =>
-          operation.taskIds.includes(item.taskId),
-        )) {
-          retry(() => {
-            const current = participants().find((item) => item.id === participant.id);
-            if (current === undefined) return;
-            return schedule.updateParticipant(auth, projectId, current.id, {
-              expectedRevision: current.revision,
-              startDate: shift(current.startDate, -operation.days) ?? current.startDate,
-              endDate: shift(current.endDate, -operation.days) ?? current.endDate,
-            });
-          });
-        }
-        return;
-      }
-    }
+      return { projectId, reverted, skipped: [] };
+    });
+  } catch (error) {
+    return {
+      projectId,
+      reverted: 0,
+      skipped: [error instanceof Error ? error.message : String(error)],
+    };
   }
 }
