@@ -227,7 +227,7 @@ namespace ToDoListLauncher
 
         private static void EnsureOwnedDirectory(string directory, string root, HashSet<string> owned)
         {
-            directory = Path.GetFullPath(directory);
+            directory = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
             if (owned.Contains(directory))
             {
                 RejectReparseAncestors(directory);
@@ -269,6 +269,8 @@ namespace ToDoListLauncher
                     // Reject alternate data streams and Windows reserved device names.
                     foreach (string part in entry.FullName.Split(new char[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries))
                     {
+                        // 构建脚本产生的条目带 "./" 前缀；"." 是当前目录，不是不安全文件名。
+                        if (part == ".") continue;
                         string name = part.Split('.')[0].ToUpperInvariant();
                         if (part.Contains(":") || part.EndsWith(".") || part.EndsWith(" ") ||
                             name == "CON" || name == "PRN" || name == "AUX" || name == "NUL" ||
