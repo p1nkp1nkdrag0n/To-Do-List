@@ -82,17 +82,6 @@ export function applyPlan(
   const placeholderToReal = new Map<string, string>();
   const afterRevisions: ApplyResult["afterRevisions"] = { tasks: {}, participants: {} };
 
-  const captureRevisions = (taskIds: Set<string>, participantIds: Set<string>): void => {
-    for (const task of runtime.schedule.listTasks(auth, projectId)) {
-      if (taskIds.has(task.id)) afterRevisions.tasks[task.id] = task.revision;
-    }
-    for (const participant of runtime.schedule.listParticipants(auth, projectId)) {
-      if (participantIds.has(participant.id)) {
-        afterRevisions.participants[participant.id] = participant.revision;
-      }
-    }
-  };
-
   for (const rawOperation of plan.operations) {
     const operation: PlanOperation =
       "participantId" in rawOperation && placeholderToReal.has(rawOperation.participantId)
@@ -100,32 +89,18 @@ export function applyPlan(
         : rawOperation;
 
     try {
-      const created = applyOperation(runtime, projectId, operation);
-      if (created !== undefined && rawOperation.kind === "split") {
-        placeholderToReal.set(rawOperation.newParticipantId, created.id);
+      const result = applyOperation(runtime, projectId, operation);
+      if (result.created !== undefined && rawOperation.kind === "split") {
+        placeholderToReal.set(rawOperation.newParticipantId, result.created.id);
         createdParticipants.push({
           placeholderId: rawOperation.newParticipantId,
-          realId: created.id,
+          realId: result.created.id,
           taskId: rawOperation.taskId,
           userId: rawOperation.toUserId,
         });
       }
-      const touchedTasks = new Set<string>();
-      const touchedParticipants = new Set<string>();
-      if (operation.kind === "shiftTask") {
-        for (const taskId of operation.taskIds) touchedTasks.add(taskId);
-        for (const participant of runtime.schedule.listParticipants(auth, projectId)) {
-          if (operation.taskIds.includes(participant.taskId)) touchedParticipants.add(participant.id);
-        }
-      } else {
-        touchedTasks.add(operation.taskId);
-        touchedParticipants.add(operation.participantId);
-        if (operation.kind === "split") {
-          const realId = placeholderToReal.get(operation.newParticipantId);
-          if (realId !== undefined) touchedParticipants.add(realId);
-        }
-      }
-      captureRevisions(touchedTasks, touchedParticipants);
+      Object.assign(afterRevisions.tasks, result.revisions.tasks);
+      Object.assign(afterRevisions.participants, result.revisions.participants);
     } catch (error) {
       // 失败就整体回滚到应用前的快照：不能把项目留在“改了一半”的状态。
       const message = error instanceof Error ? error.message : String(error);
@@ -178,33 +153,44 @@ function shiftDate(date: string | null, days: number): string | null {
     .slice(0, 10);
 }
 
+interface OperationResult {
+  created?: { id: string };
+  revisions: {
+    tasks: Record<string, number>;
+    participants: Record<string, number>;
+  };
+}
+
 function applyOperation(
   runtime: McpRuntime,
   projectId: string,
   operation: PlanOperation,
-): { id: string } | undefined {
+): OperationResult {
   const schedule = runtime.schedule;
   const auth = runtime.auth;
+  const revisions: OperationResult["revisions"] = { tasks: {}, participants: {} };
 
   switch (operation.kind) {
     case "reassign": {
-      retry(() => {
+      const updated = retry(() => {
         const participant = findParticipant(runtime, projectId, operation.participantId);
         return schedule.updateParticipant(auth, projectId, operation.participantId, {
           expectedRevision: participant.revision,
           userId: operation.toUserId,
         });
       });
-      return undefined;
+      revisions.participants[updated.participant.id] = updated.participant.revision;
+      return { revisions };
     }
     case "split": {
-      retry(() => {
+      const updated = retry(() => {
         const participant = findParticipant(runtime, projectId, operation.participantId);
         return schedule.updateParticipant(auth, projectId, operation.participantId, {
           expectedRevision: participant.revision,
           estimatedMinutes: Math.max(1, participant.estimatedMinutes - operation.moveMinutes),
         });
       });
+      revisions.participants[updated.participant.id] = updated.participant.revision;
       const added = retry(() => {
         const participant = findParticipant(runtime, projectId, operation.participantId);
         // 撤销过一次之后再跑，同一对人会撞上「软删除的历史分工」，
@@ -225,31 +211,36 @@ function applyOperation(
           estimatedMinutes: operation.moveMinutes,
         });
       });
-      return added.participant;
+      revisions.participants[added.participant.id] = added.participant.revision;
+      return { created: { id: added.participant.id }, revisions };
     }
     case "extend": {
-      retry(() => {
+      const updated = retry(() => {
         const participant = findParticipant(runtime, projectId, operation.participantId);
         return schedule.updateParticipant(auth, projectId, operation.participantId, {
           expectedRevision: participant.revision,
           endDate: operation.newEndDate,
         });
       });
+      revisions.participants[updated.participant.id] = updated.participant.revision;
       const task = findTask(runtime, projectId, operation.taskId);
       if (task.dueDate !== null && operation.newEndDate > task.dueDate) {
-        retry(() => {
+        const changed = retry(() => {
           const current = findTask(runtime, projectId, operation.taskId);
           return schedule.updateTask(auth, projectId, operation.taskId, {
             expectedRevision: current.revision,
             dueDate: operation.newEndDate,
           });
         });
+        revisions.tasks[changed.task.id] = changed.task.revision;
+      } else {
+        revisions.tasks[task.id] = task.revision;
       }
-      return undefined;
+      return { revisions };
     }
     case "shiftTask": {
       for (const taskId of operation.taskIds) {
-        retry(() => {
+        const changed = retry(() => {
           const current = findTask(runtime, projectId, taskId);
           return schedule.updateTask(auth, projectId, taskId, {
             expectedRevision: current.revision,
@@ -257,21 +248,23 @@ function applyOperation(
             dueDate: shiftDate(current.dueDate, operation.days),
           });
         });
+        revisions.tasks[changed.task.id] = changed.task.revision;
         const participants = runtime.schedule
           .listParticipants(auth, projectId)
           .filter((participant) => participant.taskId === taskId);
         for (const participant of participants) {
-          retry(() => {
-            const current = findParticipant(runtime, projectId, participant.id);
+          const current = retry(() => {
+            const currentParticipant = findParticipant(runtime, projectId, participant.id);
             return schedule.updateParticipant(auth, projectId, participant.id, {
-              expectedRevision: current.revision,
-              startDate: shiftDate(current.startDate, operation.days) ?? current.startDate,
-              endDate: shiftDate(current.endDate, operation.days) ?? current.endDate,
+              expectedRevision: currentParticipant.revision,
+              startDate: shiftDate(currentParticipant.startDate, operation.days) ?? currentParticipant.startDate,
+              endDate: shiftDate(currentParticipant.endDate, operation.days) ?? currentParticipant.endDate,
             });
           });
+          revisions.participants[current.participant.id] = current.participant.revision;
         }
       }
-      return undefined;
+      return { revisions };
     }
   }
 }

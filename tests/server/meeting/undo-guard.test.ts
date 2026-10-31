@@ -200,4 +200,51 @@ describe("撤销写后版本保护", () => {
     expect(participants[0]!.estimatedMinutes).toBe(600);
   });
 
+
+  it("同一分工连续两次 reassign：撤销内部版本递增，不误判冲突", () => {
+    const f = fixture();
+    // 模拟 apply：owner → other → owner，最终 revision = 3。
+    const first = f.schedule.updateParticipant(f.lead, f.projectId, f.participant.id, {
+      expectedRevision: f.participant.revision,
+      userId: f.otherId,
+    }).participant;
+    const second = f.schedule.updateParticipant(f.lead, f.projectId, first.id, {
+      expectedRevision: first.revision,
+      userId: f.ownerId,
+    }).participant;
+    const plan: AppliedPlanRecord = {
+      id: "plan-3",
+      label: "连续换人",
+      operations: [
+        {
+          kind: "reassign",
+          participantId: f.participant.id,
+          taskId: f.task.id,
+          fromUserId: f.ownerId,
+          toUserId: f.otherId,
+        },
+        {
+          kind: "reassign",
+          participantId: f.participant.id,
+          taskId: f.task.id,
+          fromUserId: f.otherId,
+          toUserId: f.ownerId,
+        },
+      ],
+      afterRevisions: {
+        tasks: {},
+        participants: { [second.id]: second.revision },
+      },
+    };
+
+    const result = undoPlan(f.dependencies, f.lead, f.projectId, plan);
+
+    expect(result.reverted).toBe(2);
+    expect(result.skipped).toEqual([]);
+    expect(
+      f.schedule.listParticipants(f.lead, f.projectId).find((item) => item.id === second.id)
+        ?.userId,
+    ).toBe(f.ownerId);
+  });
+
 });

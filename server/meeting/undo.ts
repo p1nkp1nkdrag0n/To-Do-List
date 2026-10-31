@@ -82,21 +82,29 @@ export function undoPlan(
           .map((row) => [row.id, row]),
       );
 
+      const checkedParticipants = new Set<string>();
+      const checkedTasks = new Set<string>();
       const requireParticipant = (id: string): ParticipantRow => {
         const row = participants.get(id);
         if (row === undefined || row.removed_at !== null) {
           throw new HttpError(409, "UNDO_STALE", "分工已被删除或修改，已拒绝撤销。");
         }
-        if (after.participants[id] !== row.revision) {
-          throw new HttpError(409, "UNDO_STALE", "分工已被人工修改，已拒绝撤销。");
+        if (!checkedParticipants.has(id)) {
+          if (after.participants[id] !== row.revision) {
+            throw new HttpError(409, "UNDO_STALE", "分工已被人工修改，已拒绝撤销。");
+          }
+          checkedParticipants.add(id);
         }
         return row;
       };
       const requireTask = (id: string): TaskRow => {
         const row = tasks.get(id);
         if (row === undefined) throw new HttpError(409, "UNDO_STALE", "任务已被删除，已拒绝撤销。");
-        if (after.tasks[id] !== row.revision) {
-          throw new HttpError(409, "UNDO_STALE", "任务已被人工修改，已拒绝撤销。");
+        if (!checkedTasks.has(id)) {
+          if (after.tasks[id] !== row.revision) {
+            throw new HttpError(409, "UNDO_STALE", "任务已被人工修改，已拒绝撤销。");
+          }
+          checkedTasks.add(id);
         }
         return row;
       };
@@ -122,6 +130,11 @@ export function undoPlan(
           ],
         );
         if (changed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "分工写入冲突，已拒绝撤销。");
+        row.user_id = fields.userId ?? row.user_id;
+        row.start_date = fields.startDate ?? row.start_date;
+        row.end_date = fields.endDate ?? row.end_date;
+        row.estimated_minutes = fields.estimatedMinutes ?? row.estimated_minutes;
+        row.revision += 1;
       };
       const updateTask = (row: TaskRow, startDate: string | null, dueDate: string | null) => {
         const changed = db.run(
@@ -131,6 +144,9 @@ export function undoPlan(
           [startDate, dueDate, auth.user.id, new Date().toISOString(), row.id, projectId, row.revision],
         );
         if (changed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "任务写入冲突，已拒绝撤销。");
+        row.start_date = startDate;
+        row.due_date = dueDate;
+        row.revision += 1;
       };
 
       let reverted = 0;
