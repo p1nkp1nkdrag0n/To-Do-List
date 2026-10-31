@@ -66,7 +66,12 @@ if (process.env.TODOLIST_DATA_ROOT) {
 } else {
   const exeDir = process.env.TODOLIST_EXE_DIR;
   const pointer = exeDir ? path.join(exeDir, "todolist-data-root.txt") : undefined;
-  if (pointer && fs.existsSync(pointer)) {
+  const pointerState = pointer ? pathState(pointer) : "missing";
+  if (pointerState === "unknown") {
+    // 权限未知不能当成“没有指针”，否则会绕过用户上次的选择。
+    throw new Error("无法判断数据目录指针是否存在，已停止启动：" + pointer);
+  }
+  if (pointerState === "exists") {
     // 上次确认过的持久目录；空值/相对路径/不可用都要报错，不能自动换库。
     const saved = fs.readFileSync(pointer, "utf8").trim();
     if (saved === "" || !path.isAbsolute(saved)) {

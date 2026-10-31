@@ -73,6 +73,12 @@ namespace ToDoListLauncher
                             try
                             {
                                 Directory.CreateDirectory(candidate);
+                                // 先拒绝重解析点，再创建 claim；顺序不能反。
+                                FileAttributes attributes = File.GetAttributes(candidate);
+                                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                                {
+                                    continue;
+                                }
                                 // 用 CreateNew 的占位文件做独占认领；预先存在的目录不会被接管。
                                 using (FileStream claim = new FileStream(
                                     Path.Combine(candidate, ".claim"),
@@ -88,8 +94,10 @@ namespace ToDoListLauncher
                                 // 已有人先认领：不删除、不接管，换名字重试。
                                 continue;
                             }
-                            FileAttributes attributes = File.GetAttributes(candidate);
-                            if ((attributes & FileAttributes.ReparsePoint) != 0)
+                            // claim 之后只接受“本次认领”这一个条目；出现外来文件就不接管、也不删除。
+                            string[] entries = Directory.GetFileSystemEntries(candidate);
+                            if (entries.Length != 1 ||
+                                Path.GetFileName(entries[0]) != ".claim")
                             {
                                 continue;
                             }
