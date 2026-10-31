@@ -5,9 +5,10 @@
  * 不能在事务外检查、再用服务层逐条写：服务层的 retry 会重读别人刚改的值，
  * 把“30 分钟”再 +480，得到 510。
  *
- * 因此这里直接用事务内 SQL 写入，只接受 apply 时记录的 afterRevisions；
+ * 因此使用作用域内服务写入（含状态重算/活动记录），只接受 apply 的 afterRevisions；
  * 任一记录已变化或缺少 afterRevisions，整次撤销拒绝，不写任何一条。
  */
+import { ScheduleService } from "../modules/schedule/schedule-service.js";
 import { HttpError } from "../http/errors.js";
 import type { V2RuntimeDependencies } from "../http/dependencies.js";
 import type { AuthenticatedSession } from "../modules/auth/auth-service.js";
@@ -74,7 +75,7 @@ export function undoPlan(
   });
 
   try {
-    return db.transaction(() => {
+    return new ScheduleService(dependencies).writeUnit(auth, projectId, (writes) => {
       const participants = new Map(
         db
           .all<ParticipantRow>(
@@ -92,72 +93,38 @@ export function undoPlan(
           .map((row) => [row.id, row]),
       );
 
-      const checkedParticipants = new Set<string>();
-      const checkedTasks = new Set<string>();
-      const requireParticipant = (id: string): ParticipantRow => {
+      // Verify the entire receipt before any service mutation can revise related tasks.
+      for (const [id, revision] of Object.entries(after.participants)) {
         const row = participants.get(id);
-        if (row === undefined || row.removed_at !== null) {
-          throw new HttpError(409, "UNDO_STALE", "分工已被删除或修改，已拒绝撤销。");
-        }
-        if (!checkedParticipants.has(id)) {
-          if (after.participants[id] !== row.revision) {
-            throw new HttpError(409, "UNDO_STALE", "分工已被人工修改，已拒绝撤销。");
-          }
-          checkedParticipants.add(id);
-        }
+        if (!row || row.removed_at !== null || row.revision !== revision)
+          throw new HttpError(409, "UNDO_STALE", "分工已被人工修改，已拒绝撤销。");
+      }
+      for (const [id, revision] of Object.entries(after.tasks)) {
+        if (tasks.get(id)?.revision !== revision)
+          throw new HttpError(409, "UNDO_STALE", "任务已被人工修改，已拒绝撤销。");
+      }
+      const requireParticipant = (id: string): ParticipantRow => {
+        if (after.participants[id] === undefined)
+          throw new HttpError(409, "UNDO_STALE", "缺少分工版本，已拒绝撤销。");
+        const row = db.get<ParticipantRow>(
+          "SELECT * FROM task_participants WHERE project_id=? AND id=? AND removed_at IS NULL",
+          [projectId, id]);
+        if (!row) throw new HttpError(409, "UNDO_STALE", "分工已被删除，已拒绝撤销。");
         return row;
       };
       const requireTask = (id: string): TaskRow => {
-        const row = tasks.get(id);
-        if (row === undefined) throw new HttpError(409, "UNDO_STALE", "任务已被删除，已拒绝撤销。");
-        if (!checkedTasks.has(id)) {
-          if (after.tasks[id] !== row.revision) {
-            throw new HttpError(409, "UNDO_STALE", "任务已被人工修改，已拒绝撤销。");
-          }
-          checkedTasks.add(id);
-        }
+        if (after.tasks[id] === undefined)
+          throw new HttpError(409, "UNDO_STALE", "缺少任务版本，已拒绝撤销。");
+        const row = db.get<TaskRow>("SELECT * FROM tasks WHERE project_id=? AND id=? AND deleted_at IS NULL", [projectId, id]);
+        if (!row) throw new HttpError(409, "UNDO_STALE", "任务已被删除，已拒绝撤销。");
         return row;
       };
       const updateParticipant = (
         row: ParticipantRow,
         fields: { userId?: string; startDate?: string; endDate?: string; estimatedMinutes?: number },
-      ) => {
-        const changed = db.run(
-          `UPDATE task_participants
-              SET user_id = ?, start_date = ?, end_date = ?, estimated_minutes = ?,
-                  updated_by = ?, updated_at = ?, revision = revision + 1
-            WHERE id = ? AND project_id = ? AND revision = ?`,
-          [
-            fields.userId ?? row.user_id,
-            fields.startDate ?? row.start_date,
-            fields.endDate ?? row.end_date,
-            fields.estimatedMinutes ?? row.estimated_minutes,
-            auth.user.id,
-            new Date().toISOString(),
-            row.id,
-            projectId,
-            row.revision,
-          ],
-        );
-        if (changed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "分工写入冲突，已拒绝撤销。");
-        row.user_id = fields.userId ?? row.user_id;
-        row.start_date = fields.startDate ?? row.start_date;
-        row.end_date = fields.endDate ?? row.end_date;
-        row.estimated_minutes = fields.estimatedMinutes ?? row.estimated_minutes;
-        row.revision += 1;
-      };
-      const updateTask = (row: TaskRow, startDate: string | null, dueDate: string | null) => {
-        const changed = db.run(
-          `UPDATE tasks
-              SET start_date = ?, due_date = ?, updated_by = ?, updated_at = ?, revision = revision + 1
-            WHERE id = ? AND project_id = ? AND revision = ?`,
-          [startDate, dueDate, auth.user.id, new Date().toISOString(), row.id, projectId, row.revision],
-        );
-        if (changed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "任务写入冲突，已拒绝撤销。");
-        row.start_date = startDate;
-        row.due_date = dueDate;
-        row.revision += 1;
-      };
+      ) => writes.updateParticipant(row.id, { expectedRevision: row.revision, ...fields });
+      const updateTask = (row: TaskRow, startDate: string | null, dueDate: string | null) =>
+        writes.updateTask(row.id, { expectedRevision: row.revision, startDate, dueDate });
 
       let reverted = 0;
       for (const operation of [...operations].reverse()) {
@@ -168,22 +135,7 @@ export function undoPlan(
             );
             const createdId = mapping?.realId ?? operation.newParticipantId;
             const created = requireParticipant(createdId);
-            const removedAt = new Date().toISOString();
-            const removed = db.run(
-              "UPDATE task_participants SET removed_at = ?, removed_by = ?, updated_by = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND project_id = ? AND revision = ? AND removed_at IS NULL",
-              [
-                removedAt,
-                auth.user.id,
-                auth.user.id,
-                removedAt,
-                created.id,
-                projectId,
-                created.revision,
-              ],
-            );
-            if (removed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "拆出的分工状态已变化，已拒绝撤销。");
-            created.removed_at = removedAt;
-            created.revision += 1;
+            writes.deleteParticipant(created.id, created.revision);
             const source = requireParticipant(operation.participantId);
             updateParticipant(source, {
               estimatedMinutes: source.estimated_minutes + operation.moveMinutes,
@@ -196,13 +148,15 @@ export function undoPlan(
             break;
           }
           case "extend": {
+            if (operation.previousTaskDueDate === undefined)
+              throw new HttpError(409, "UNDO_STALE", "缺少原任务截止日期，已安全拒绝旧记录撤销。");
             const participant = requireParticipant(operation.participantId);
             updateParticipant(participant, { endDate: operation.previousEndDate });
             const task = requireTask(operation.taskId);
             updateTask(
               task,
               task.start_date,
-              operation.previousTaskDueDate ?? operation.previousEndDate,
+              operation.previousTaskDueDate,
             );
             break;
           }
@@ -231,10 +185,6 @@ export function undoPlan(
         reverted += 1;
       }
 
-      db.run(
-        "UPDATE projects SET schedule_revision = schedule_revision + 1 WHERE id = ? AND deleted_at IS NULL",
-        [projectId],
-      );
       return { projectId, reverted, skipped: [] };
     });
   } catch (error) {

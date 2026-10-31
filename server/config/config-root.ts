@@ -17,12 +17,12 @@ export function dataRoot(): string {
   return path.join(process.cwd(), "data", "v2");
 }
 
-/** 迁移旧文件（存在才动），返回新路径。 */
+/** 复制旧文件（保留原件且绝不覆盖新文件），返回新路径。 */
 export function migrateFile(legacyPath: string, nextPath: string): void {
   try {
     if (fs.existsSync(nextPath) || !fs.existsSync(legacyPath)) return;
     fs.mkdirSync(path.dirname(nextPath), { recursive: true });
-    fs.renameSync(legacyPath, nextPath);
+    fs.copyFileSync(legacyPath, nextPath, fs.constants.COPYFILE_EXCL);
   } catch {
     // 迁移失败不影响读取：调用方会在新路径读不到时再回退。
   }

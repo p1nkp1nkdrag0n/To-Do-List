@@ -320,7 +320,7 @@ describe("plan → apply 落库", () => {
     expect(after.estimatedMinutes).toBe(300);
   });
 
-  it("任务被别人改过（revision +1）时，apply 会重试而不是抛 REVISION_CONFLICT", () => {
+  it("试算后 revision 前进，即使值不变也拒绝旧计划", () => {
     const fixture = buildFixture();
     const runtime = trackRuntime(
       createMcpRuntime({ dbPath: fixture.dbPath, username: LEAD }),
@@ -343,15 +343,37 @@ describe("plan → apply 落库", () => {
     );
     expect(bumped.participant.revision).toBe(originalRevision + 1);
 
-    // 方案里存的是旧 revision；如果不重试，这里必然抛 REVISION_CONFLICT。
-    const result = applyPlan(runtime, fixture.projectId, plan);
+    expect(() => applyPlan(runtime, fixture.projectId, plan)).toThrow(/改动过|重新 plan_reschedule/);
+    const after = runtime.schedule.listParticipants(runtime.auth, fixture.projectId)
+      .find(candidate => candidate.id === participant.id)!;
+    expect(after.revision).toBe(originalRevision + 1);
+  });
 
-    expect(result.conflictsAfter).toBe(0);
+  it.each([undefined, "", "legacy:tasks#participants"])("拒绝缺失或旧版签名 %s", signature => {
+    const fixture = buildFixture();
+    const runtime = trackRuntime(createMcpRuntime({ dbPath: fixture.dbPath, username: LEAD }), fixture);
+    const { snapshot, context } = loadSchedule(runtime, fixture.projectId);
+    const plan = planReschedules(snapshot, context).find(candidate => candidate.feasible)!;
+    const before = runtime.schedule.schedule(runtime.auth, fixture.projectId);
+    expect(() => applyPlan(runtime, fixture.projectId, {...plan, beforeSignature: signature as string}))
+      .toThrow(/改动过|重新 plan_reschedule/);
+    expect(runtime.schedule.schedule(runtime.auth, fixture.projectId)).toEqual(before);
+  });
 
-    const after = runtime.schedule
-      .listParticipants(runtime.auth, fixture.projectId)
-      .find((candidate) => candidate.id === participant.id)!;
-    expect(after.revision).toBeGreaterThan(originalRevision + 1);
+  it("另一连接仅修改 availability，不改变冲突数也使旧计划失效", () => {
+    const fixture = buildFixture();
+    const runtime = trackRuntime(createMcpRuntime({ dbPath: fixture.dbPath, username: LEAD }), fixture);
+    const { snapshot, context } = loadSchedule(runtime, fixture.projectId);
+    const plan = planReschedules(snapshot, context).find(candidate => candidate.feasible)!;
+    const writer = openV2Database(fixture.dbPath);
+    try {
+      // Lead is not assigned to the conflicted task. Changing this profile leaves count alone.
+      writer.run("UPDATE availability_profiles SET weekly_capacity_minutes = weekly_capacity_minutes - 1 WHERE user_id = ?", [fixture.userIds.lead]);
+    } finally { writer.close(); }
+    expect(runtime.availability.projectConflicts(fixture.projectId).length).toBe(plan.before.conflicts);
+    const before = runtime.schedule.schedule(runtime.auth, fixture.projectId);
+    expect(() => applyPlan(runtime, fixture.projectId, plan)).toThrow(/改动过|重新 plan_reschedule/);
+    expect(runtime.schedule.schedule(runtime.auth, fixture.projectId)).toEqual(before);
   });
 
   it("方案里的分工已被删除时给出可读错误，而不是崩掉", () => {

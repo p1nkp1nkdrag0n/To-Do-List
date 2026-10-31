@@ -76,6 +76,7 @@ export const BootstrapAdminRequestSchema = z
     username: UsernameSchema,
     displayName: DisplayNameSchema,
     password: PasswordSchema,
+    bootstrapCode: z.string().min(1).optional(),
   })
   .strict();
 

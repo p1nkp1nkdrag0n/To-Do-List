@@ -15,19 +15,22 @@ namespace ToDoListLauncher
             {
                 string exePath = Process.GetCurrentProcess().MainModule.FileName;
                 string exeDir = Path.GetDirectoryName(exePath);
-                string target = ChooseTarget(exeDir);
-                string marker = Path.Combine(target, ".extracted");
+                string extractionRoot = ChooseTarget(exeDir);
+                string target = "";
+                string marker = "";
 
                 // 临时文件不能放 %TEMP%：有些机器连用户目录都写不了。
                 // 放到「程序目录的同级」，那里刚刚验证过可写。
                 string tempZip = Path.Combine(
-                    Path.GetDirectoryName(target.TrimEnd(Path.DirectorySeparatorChar)),
-                    "todolist-payload.zip");
+                    extractionRoot,
+                    "payload-" + Guid.NewGuid().ToString("N") + ".zip");
                 using (Stream payload = Assembly.GetExecutingAssembly()
                     .GetManifestResourceStream("payload.zip"))
                 {
                     if (payload == null) throw new Exception("程序包损坏：找不到内嵌资源。");
                     string fingerprint = Fingerprint(payload);
+                    target = Path.Combine(extractionRoot, "versions", fingerprint);
+                    marker = Path.Combine(target, ".extracted");
                     string installed = File.Exists(marker) ? File.ReadAllText(marker).Trim() : "";
 
                     if (installed != fingerprint)
@@ -40,24 +43,19 @@ namespace ToDoListLauncher
                         {
                             payload.CopyTo(zipFile);
                         }
-                        for (int attempt = 1; attempt <= 2; attempt += 1)
-                        {
-                            if (Directory.Exists(target)) Directory.Delete(target, true);
-                            Directory.CreateDirectory(target);
-                            int count = Extract(tempZip, target);
-                            string missing = MissingSentinel(target);
-                            if (missing.Length == 0)
-                            {
-                                File.WriteAllText(marker, fingerprint);
-                                Console.WriteLine("准备完成（解压 " + count + " 个文件）。");
-                                break;
-                            }
-                            Console.WriteLine("解压不完整（缺少 " + missing + "），重试第 " + attempt + " 次…");
-                            if (attempt == 2)
-                            {
-                                throw new Exception("解压后仍缺少 " + missing + "，可能是磁盘空间不足或杀毒软件拦截。");
-                            }
-                        }
+                        // Never delete an earlier installation: older launchers could store
+                        // user data inside it. Extract into a fresh staging directory instead.
+                        string staging = target + ".staging-" + Guid.NewGuid().ToString("N");
+                        Directory.CreateDirectory(staging);
+                        int count = Extract(tempZip, staging);
+                        string missing = MissingSentinel(staging);
+                        if (missing.Length != 0)
+                            throw new Exception("解压不完整（缺少 " + missing + "）。原版本和数据未被修改。");
+                        File.WriteAllText(Path.Combine(staging, ".extracted"), fingerprint);
+                        if (Directory.Exists(target))
+                            throw new Exception("目标版本目录已存在但校验标记不符；为保护数据，未覆盖：" + target);
+                        Directory.Move(staging, target);
+                        Console.WriteLine("准备完成（解压 " + count + " 个文件）。");
                         File.Delete(tempZip);
                     }
                 }
@@ -66,12 +64,18 @@ namespace ToDoListLauncher
                 string launcher = Path.Combine(target, "launcher", "launch.mjs");
                 if (!File.Exists(node) || !File.Exists(launcher))
                 {
-                    throw new Exception("解压不完整，请删除目录后重试：" + target);
+                    throw new Exception("解压不完整，原数据未改动；请重新下载程序并保留此目录排查：" + target);
                 }
 
                 var start = new ProcessStartInfo(node, "\"" + launcher + "\"");
                 start.WorkingDirectory = target;
                 start.UseShellExecute = false;
+                // Preserve discovery of an earlier exe-directory fallback even if
+                // LOCALAPPDATA becomes writable and ChooseTarget changes today.
+                start.EnvironmentVariables["TODOLIST_EXE_DIR"] = exeDir;
+                string oldData = Path.Combine(extractionRoot, "ToDoList-data");
+                if (Directory.Exists(oldData))
+                    start.EnvironmentVariables["TODOLIST_LEGACY_ROOT"] = oldData;
                 using (Process child = Process.Start(start))
                 {
                     child.WaitForExit();
@@ -109,7 +113,7 @@ namespace ToDoListLauncher
                 foreach (ZipArchiveEntry entry in archive.Entries)
                 {
                     string destination = Path.GetFullPath(Path.Combine(target, entry.FullName));
-                    if (!destination.StartsWith(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+                    if (!destination.StartsWith(Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                     {
                         continue; // 防目录穿越
                     }
@@ -137,6 +141,7 @@ namespace ToDoListLauncher
             string[] required =
             {
                 "node.exe",
+                Path.Combine("launcher", "data-root.mjs"),
                 Path.Combine("app", "dist-server", "server", "v2.js"),
                 Path.Combine("app", "node_modules", "mammoth", "package.json"),
                 Path.Combine("app", "node_modules", "express", "package.json"),

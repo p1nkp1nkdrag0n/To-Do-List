@@ -1,3 +1,4 @@
+import { types as utilTypes } from "node:util";
 import type {
   ApplyTemplateRequest,
   CreateDependencyRequest,
@@ -475,6 +476,13 @@ function toTeamTemplate(row: TeamTemplateRow): TeamTemplateEntity {
   };
 }
 
+export interface ScheduleWriteUnit {
+  updateTask(id: string, input: PatchTaskRequest): { task: TaskEntity; scheduleRevision: number };
+  updateParticipant(id: string, input: PatchParticipantRequest): { participant: ParticipantEntity; scheduleRevision: number };
+  addParticipant(taskId: string, input: CreateParticipantRequest): { participant: ParticipantEntity; scheduleRevision: number };
+  deleteParticipant(id: string, revision: number): { deleted: true; scheduleRevision: number };
+}
+
 export class ScheduleService {
   constructor(protected readonly dependencies: V2RuntimeDependencies) {}
 
@@ -501,6 +509,35 @@ export class ScheduleService {
       deliverableRequirements: this.deliverableRows(projectId).map(toDeliverable),
       conflicts: new AvailabilityService(this.dependencies).projectConflicts(projectId),
     };
+  }
+
+  /**
+   * A synchronous, scoped write unit. Public single-write APIs still own their
+   * transactions; compound operations use these same validated internals.
+   * The facade cannot be retained and used after commit/rollback.
+   */
+  writeUnit<Result>(
+    auth: AuthenticatedSession,
+    projectId: string,
+    operation: (writes: ScheduleWriteUnit) => Result,
+  ): Result {
+    if (utilTypes.isAsyncFunction(operation)) throw new TypeError("Schedule write units must be synchronous.");
+    return this.dependencies.database.transaction<unknown>(() => {
+      this.requireProjectMember(auth, projectId);
+      const project = this.dependencies.database.get<{ archived_at: string | null }>(
+        "SELECT archived_at FROM projects WHERE id = ?", [projectId],
+      );
+      if (project?.archived_at !== null) throw new HttpError(409, "PROJECT_ARCHIVED", "The project is archived.");
+      let active = true;
+      const check = () => { if (!active) throw new Error("Schedule write unit has expired."); };
+      const writes: ScheduleWriteUnit = {
+        updateTask: (id, input) => { check(); return this.updateTaskInTransaction(auth, projectId, id, input); },
+        updateParticipant: (id, input) => { check(); return this.updateParticipantInTransaction(auth, projectId, id, input); },
+        addParticipant: (id, input) => { check(); return this.addParticipantInTransaction(auth, projectId, id, input); },
+        deleteParticipant: (id, revision) => { check(); return this.deleteParticipantInTransaction(auth, projectId, id, revision); },
+      };
+      try { return operation(writes); } finally { active = false; }
+    }) as Result;
   }
 
   listPhases(auth: AuthenticatedSession, projectId: string): PhaseEntity[] {
@@ -790,7 +827,16 @@ export class ScheduleService {
     taskId: string,
     input: PatchTaskRequest,
   ): { task: TaskEntity; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
+    return this.dependencies.database.transaction(() => this.updateTaskInTransaction(auth, projectId, taskId, input));
+  }
+
+  private updateTaskInTransaction(
+    auth: AuthenticatedSession,
+    projectId: string,
+    taskId: string,
+    input: PatchTaskRequest,
+  ): { task: TaskEntity; scheduleRevision: number } {
+
       this.requireProjectMember(auth, projectId);
       const current = this.requireTask(projectId, taskId);
       this.assertRevision("task", current, input.expectedRevision, toTask);
@@ -856,7 +902,6 @@ export class ScheduleService {
       });
       const scheduleRevision = this.bumpScheduleRevision(projectId);
       return { task: toTask(this.taskRow(projectId, taskId)!), scheduleRevision };
-    });
   }
 
   deleteTask(auth: AuthenticatedSession, projectId: string, taskId: string, expectedRevision: number): { deleted: true; scheduleRevision: number } {
@@ -984,7 +1029,16 @@ export class ScheduleService {
     participantId: string,
     input: PatchParticipantRequest,
   ): { participant: ParticipantEntity; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
+    return this.dependencies.database.transaction(() => this.updateParticipantInTransaction(auth, projectId, participantId, input));
+  }
+
+  private updateParticipantInTransaction(
+    auth: AuthenticatedSession,
+    projectId: string,
+    participantId: string,
+    input: PatchParticipantRequest,
+  ): { participant: ParticipantEntity; scheduleRevision: number } {
+
       this.requireProjectMember(auth, projectId);
       const current = this.requireParticipant(projectId, participantId);
       this.assertRevision("participant", current, input.expectedRevision, toParticipant);
@@ -1010,13 +1064,18 @@ export class ScheduleService {
       this.recomputeTaskAndAncestors(projectId, current.task_id, auth.user.id, now);
       writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "participant", entityId: participantId, action: "participant.updated" });
       return { participant: toParticipant(this.requireParticipant(projectId, participantId)), scheduleRevision: this.bumpScheduleRevision(projectId) };
-    });
   }
 
   deleteParticipant(
     auth: AuthenticatedSession, projectId: string, participantId: string, expectedRevision: number,
   ): { deleted: true; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
+    return this.dependencies.database.transaction(() => this.deleteParticipantInTransaction(auth, projectId, participantId, expectedRevision));
+  }
+
+  private deleteParticipantInTransaction(
+    auth: AuthenticatedSession, projectId: string, participantId: string, expectedRevision: number,
+  ): { deleted: true; scheduleRevision: number } {
+
       this.requireProjectMember(auth, projectId);
       const current = this.requireParticipant(projectId, participantId);
       this.assertRevision("participant", current, expectedRevision, toParticipant);
@@ -1032,7 +1091,6 @@ export class ScheduleService {
       this.recomputeTaskAndAncestors(projectId, current.task_id, auth.user.id, now);
       writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "participant", entityId: participantId, action: "participant.deleted" });
       return { deleted: true, scheduleRevision: this.bumpScheduleRevision(projectId) };
-    });
   }
 
   progressUpdates(auth: AuthenticatedSession, projectId: string, participantId: string): ProgressEntity[] {

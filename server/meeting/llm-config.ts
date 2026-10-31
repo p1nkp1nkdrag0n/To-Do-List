@@ -125,7 +125,7 @@ export function writeConfig(userId: string, config: LlmConfigFile): void {
 }
 
 /**
- * 把老版本的单文件配置搬给部署者（默认 qyhsktn），搬完删掉全局文件。
+ * 把老版本的单文件配置复制给部署者，保留原文件且不覆盖现有用户配置。
  * 只在启动时跑一次：别人登录时不会“捡到”部署者的 Key。
  */
 export function migrateLegacyConfigToOwner(ownerUserId: string): boolean {
@@ -155,8 +155,11 @@ export function migrateLegacyConfigToOwner(ownerUserId: string): boolean {
       }
     }
     if (migrated !== undefined) {
-      writeConfig(ownerUserId, migrated);
-      fs.rmSync(LEGACY_PATH, { force: true });
+      // An existing per-user file is authoritative, including an intentionally
+      // empty configuration. Never revive an old key after the user removes it.
+      if (fs.existsSync(configPath(ownerUserId)) || fs.existsSync(legacyPath(ownerUserId))) return false;
+      fs.mkdirSync(configDir(), { recursive: true });
+      fs.writeFileSync(configPath(ownerUserId), JSON.stringify(migrated, null, 2), { flag: "wx", mode: 0o600 });
       return true;
     }
   } catch {

@@ -31,14 +31,18 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [error, setError] = useState("");
   /** null = 还不知道；true = 空库，走首启向导。 */
   const [needsBootstrap, setNeedsBootstrap] = useState<boolean | null>(null);
+  const [requiresBootstrapCode, setRequiresBootstrapCode] = useState(true);
   const [confirmPassword, setConfirmPassword] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     api
-      .get<{ needsBootstrap: boolean }>("/api/auth/bootstrap-status")
+      .get<{ needsBootstrap: boolean; requiresBootstrapCode: boolean }>("/api/auth/bootstrap-status")
       .then((result) => {
-        if (!cancelled) setNeedsBootstrap(result.needsBootstrap);
+        if (!cancelled) {
+          setNeedsBootstrap(result.needsBootstrap);
+          setRequiresBootstrapCode(result.requiresBootstrapCode);
+        }
       })
       .catch(() => {
         if (!cancelled) setNeedsBootstrap(false);
@@ -92,6 +96,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           username,
           displayName,
           password,
+          ...(registrationCode ? { bootstrapCode: registrationCode } : {}),
         });
         onAuthenticated(auth);
         return;
@@ -221,6 +226,16 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   autoComplete="new-password"
                   placeholder="再输入一次密码"
                 />
+              </span>
+            </label>
+          ) : null}
+          {needsBootstrap === true && requiresBootstrapCode ? (
+            <label className="auth-field">
+              <span>初始化码（启动窗口或管理员提供）</span>
+              <span className="auth-input-shell">
+                <TicketCheck size={18} aria-hidden="true" />
+                <input value={registrationCode} onChange={(event) => setRegistrationCode(event.target.value)}
+                  required autoComplete="one-time-code" type="password" />
               </span>
             </label>
           ) : null}

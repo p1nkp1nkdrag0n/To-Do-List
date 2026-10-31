@@ -12,6 +12,7 @@
  *   严格贪心会卡在「修不动」上。所以这里用**有界束搜索**（beam search）：
  *   允许中间状态一样差甚至更差，只要最终能收敛到 0 冲突。
  */
+import { createHash } from "node:crypto";
 import { computeAvailabilityConflicts } from "../modules/availability/conflict-engine.js";
 import type {
   ConflictAvailabilityProfile,
@@ -28,6 +29,8 @@ export interface ScheduleSnapshot {
   participants: ConflictParticipant[];
   dependencies: ConflictDependency[];
   profiles: ConflictAvailabilityProfile[];
+  /** Live DB revision binds non-planning task state and detects change-and-revert. */
+  scheduleRevision?: number;
 }
 
 export interface PlanContext {
@@ -36,6 +39,7 @@ export interface PlanContext {
   memberNames: Map<string, string>;
   taskTitles: Map<string, string>;
   projectEndDate?: string | null;
+  timezone?: string;
 }
 
 export type PlanOperation =
@@ -126,6 +130,7 @@ function cloneSnapshot(snapshot: ScheduleSnapshot): ScheduleSnapshot {
     participants: snapshot.participants.map((participant) => ({ ...participant })),
     dependencies: snapshot.dependencies.map((dependency) => ({ ...dependency })),
     profiles: snapshot.profiles,
+    scheduleRevision: snapshot.scheduleRevision,
   };
 }
 
@@ -453,16 +458,47 @@ function signature(operations: PlanOperation[]): string {
     .join("|");
 }
 
-export function snapshotSignature(snapshot: ScheduleSnapshot): string {
-  const tasks = snapshot.tasks
-    .map((task) => `${task.id}:${task.startDate}:${task.dueDate}`)
-    .sort()
-    .join(",");
-  const participants = snapshot.participants
-    .map((item) => `${item.id}:${item.userId}:${item.startDate}:${item.endDate}:${item.estimatedMinutes}`)
-    .sort()
-    .join(",");
-  return `${tasks}#${participants}`;
+/** Canonical JSON avoids delimiter collisions and includes every planning input.
+ * Arrays representing sets are sorted; field names and values stay structurally distinct.
+ * A version prefix deliberately invalidates persisted plans from the old partial format.
+ */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => [key, canonical(item)]));
+  }
+  return value;
+}
+
+function canonicalSet(values: readonly unknown[]): unknown[] {
+  return values.map(canonical).sort((a, b) => {
+    const left = JSON.stringify(a); const right = JSON.stringify(b);
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
+}
+
+export function snapshotSignature(snapshot: ScheduleSnapshot, context?: PlanContext): string {
+  const payload = {
+    scheduleRevision: snapshot.scheduleRevision ?? null,
+    tasks: canonicalSet(snapshot.tasks),
+    participants: canonicalSet(snapshot.participants),
+    dependencies: canonicalSet(snapshot.dependencies),
+    profiles: canonicalSet(snapshot.profiles.map(profile => ({
+      ...profile,
+      weeklySlots: canonicalSet(profile.weeklySlots),
+      exceptions: canonicalSet(profile.exceptions),
+    }))),
+    context: context ? {
+      today: context.today,
+      timezone: context.timezone ?? null,
+      memberIds: canonicalSet(context.memberIds),
+      memberNames: canonicalSet([...context.memberNames]),
+      taskTitles: canonicalSet([...context.taskTitles]),
+      projectEndDate: context.projectEndDate ?? null,
+    } : null,
+  };
+  return `schedule-v2:${createHash("sha256").update(JSON.stringify(canonical(payload))).digest("hex")}`;
 }
 
 interface SearchNode {
@@ -626,7 +662,7 @@ export function planReschedules(
     const conflictsAfter = conflictList(node.snapshot, context.today);
     return {
       id: `plan-${index + 1}`,
-      beforeSignature: snapshotSignature(snapshot),
+      beforeSignature: snapshotSignature(snapshot, context),
       label: planLabel(node.operations),
       operations: node.operations,
       before,

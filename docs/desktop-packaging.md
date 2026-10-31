@@ -107,3 +107,45 @@
 3. **L2 单文件壳**：把 L1 目录压成自解压 exe（半天）
 4. **设置页补按钮**：备份 / 恢复 / 打开数据目录（半天）
 5. **干净环境验证**：新用户账户首次启动 → 首启向导（半天）
+
+## L11 修复实现与升级说明（本次补充）
+
+便携启动器现在只使用持久用户数据目录：Windows 默认
+`%LOCALAPPDATA%\ToDoList`，其他平台默认 `$XDG_DATA_HOME/ToDoList`
+（未设置时为 `~/.local/share/ToDoList`）。可以用绝对路径
+`TODOLIST_DATA_ROOT` 指定独立目录；不允许指定到程序目录内部。
+权限错误立即停止，不再回退到程序目录或临时目录另建空库。
+数据库、上传、备份、用户模型/ASR 配置均跟随该目录；
+启动器配置实际位于同一根目录的 `config.json`，不是旧文档所写的 APPDATA。
+
+单文件启动器按载荷 SHA256 解压到独立版本目录，不再递归删除旧解压目录。
+旧版本中的误放数据会保留。版本目录会累计占用磁盘；确认数据迁移和备份前
+不要删除旧目录。Windows C# 编译、真实 exe 覆盖升级还需要 Windows 环境验收。
+
+### 从旧的 ToDoList-app\ToDoList-data 迁移
+
+1. 完全退出旧版和新版程序，保留旧目录备份。
+2. 设置 `TODOLIST_MIGRATE_FROM` 为旧的 **ToDoList-data 根目录**
+   （应包含 config.json 和 data 子目录），设置 `TODOLIST_MIGRATION_OFFLINE=1`。
+3. 启动新版。只向空目标复制整份数据，原文件不删除；已有目标数据、
+   SQLite WAL/SHM/journal、符号链接或路径重叠会拒绝迁移，不做目录合并。
+   失败时先解决原因，不要直接删除数据库 sidecar。
+4. 成功后取消这两个迁移环境变量，再正常启动，核对账号、任务、附件和 Key。
+   已有目标库需要人工选择/备份，不能用旧库覆盖。
+5. 若旧库不在已识别的 fallback 路径，明确提供实际旧根目录，不猜测。
+
+文件级旧 Key 迁移也改为独占创建副本，保留原件且不覆盖当前配置。
+损坏的启动器配置会报错，不会重新生成 sessionSecret。
+当前实现**不支持任何自动 Key 重置**，也不会读取 RESET_KEYS.txt；
+测试需要清空 Key 时应使用隔离测试数据目录和设置页的明确删除操作。
+程序包不得包含这些旧副本、Key 或数据库。
+
+本次云端验证：真实 SQLite 的离线迁移、配置/上传/合成 Key 保留、
+目标拒绝覆盖、sidecar/链接拒绝、配置损坏不重置均有回归测试。
+测试命令：`node --test tests/packaging/data-root.test.mjs` 及
+`npx vitest run tests/server/config-root-migration.test.ts`。
+
+旧库检测也覆盖历史 `%TEMP%\ToDoList`、`%TEMP%\ToDoList-app\ToDoList-data`
+以及 exe 同级的 `ToDoList-app\ToDoList-data`。即使这次权限改善，
+程序解压位置切回 LOCALAPPDATA，发现这些旧库时也不会静默创建空库；
+仅列出候选并要求明确选择离线迁移。已有目标数据库时仍以目标为准，不自动合并。
