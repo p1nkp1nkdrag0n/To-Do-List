@@ -406,6 +406,9 @@ export class MeetingOrchestrator {
         operations: (chosen.operations ?? []) as import("../mcp/reschedule.js").PlanOperation[],
         createdParticipants: (applyOutcome.payload.createdParticipants ??
           []) as AppliedPlanRecord["createdParticipants"],
+        afterRevisions: applyOutcome.payload.afterRevisions as
+          | AppliedPlanRecord["afterRevisions"]
+          | undefined,
       },
     };
   }

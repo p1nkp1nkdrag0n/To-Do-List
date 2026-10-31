@@ -57,6 +57,50 @@ export function undoPlan(
     schedule.listParticipants(auth, projectId);
   const tasks = () => schedule.listTasks(auth, projectId);
 
+  // 先整批检查“是否仍是应用后的状态”，任一条被人工改过就整次拒绝，不写任何一条。
+  if (plan.afterRevisions !== undefined) {
+    const currentTasks = new Map(tasks().map((task) => [task.id, task.revision]));
+    const currentParticipants = new Map(
+      participants().map((participant) => [participant.id, participant.revision]),
+    );
+    const changed: string[] = [];
+    for (const operation of plan.operations) {
+      const expectedTasks = plan.afterRevisions.tasks;
+      const expectedParticipants = plan.afterRevisions.participants;
+      if (operation.kind === "shiftTask") {
+        for (const taskId of operation.taskIds) {
+          if (currentTasks.get(taskId) !== expectedTasks[taskId]) changed.push(`task:${taskId}`);
+        }
+      } else {
+        if (currentParticipants.get(operation.participantId) !== expectedParticipants[operation.participantId]) {
+          changed.push(`participant:${operation.participantId}`);
+        }
+        if (currentTasks.get(operation.taskId) !== expectedTasks[operation.taskId]) {
+          changed.push(`task:${operation.taskId}`);
+        }
+        if (operation.kind === "split") {
+          const mapping = (plan.createdParticipants ?? []).find(
+            (item) => item.placeholderId === operation.newParticipantId,
+          );
+          const realId = mapping?.realId ?? operation.newParticipantId;
+          if (currentParticipants.get(realId) !== expectedParticipants[realId]) {
+            changed.push(`participant:${realId}`);
+          }
+        }
+      }
+    }
+    if (changed.length > 0) {
+      return {
+        projectId,
+        reverted: 0,
+        skipped: [
+          `撤销已取消：${[...new Set(changed)].join("、")} 已被人工修改，` +
+            "为避免覆盖你的修改，本次未撤销任何一条。",
+        ],
+      };
+    }
+  }
+
   for (const operation of [...plan.operations].reverse()) {
     try {
       revert(operation);

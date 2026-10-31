@@ -48,6 +48,11 @@ export interface AppliedPlanRecord {
     taskId: string;
     userId: string;
   }>;
+  /** 应用完成时各记录的 revision；撤销前要求仍然一致。 */
+  afterRevisions?: {
+    tasks: Record<string, number>;
+    participants: Record<string, number>;
+  };
 }
 
 export interface MeetingRunResult {

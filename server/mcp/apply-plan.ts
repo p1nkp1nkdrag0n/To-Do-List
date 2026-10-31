@@ -40,6 +40,11 @@ export interface ApplyResult {
   remainingConflictTypes: string[];
   /** 拆分时真正落库的分工 id（占位 id → 真实 id），撤销要用。 */
   createdParticipants: Array<{ placeholderId: string; realId: string; taskId: string; userId: string }>;
+  /** 应用完成时各记录的 revision；撤销前要求仍然一致。 */
+  afterRevisions: {
+    tasks: Record<string, number>;
+    participants: Record<string, number>;
+  };
 }
 
 export function applyPlan(
@@ -106,6 +111,29 @@ export function applyPlan(
   }
 
   dropBackup(runtime);
+  const taskIds = new Set<string>();
+  const participantIds = new Set<string>();
+  for (const operation of plan.operations) {
+    if (operation.kind === "shiftTask") {
+      for (const taskId of operation.taskIds) taskIds.add(taskId);
+    } else {
+      taskIds.add(operation.taskId);
+      participantIds.add(operation.participantId);
+      if (operation.kind === "split") {
+        const realId = placeholderToReal.get(operation.newParticipantId);
+        if (realId !== undefined) participantIds.add(realId);
+      }
+    }
+  }
+  const afterRevisions: ApplyResult["afterRevisions"] = { tasks: {}, participants: {} };
+  for (const task of runtime.schedule.listTasks(runtime.auth, projectId)) {
+    if (taskIds.has(task.id)) afterRevisions.tasks[task.id] = task.revision;
+  }
+  for (const participant of runtime.schedule.listParticipants(runtime.auth, projectId)) {
+    if (participantIds.has(participant.id)) {
+      afterRevisions.participants[participant.id] = participant.revision;
+    }
+  }
   const conflictsAfter = runtime.availability.projectConflicts(projectId);
   return {
     projectId,
@@ -114,6 +142,7 @@ export function applyPlan(
     conflictsAfter: conflictsAfter.length,
     remainingConflictTypes: [...new Set(conflictsAfter.map((conflict) => conflict.type))],
     createdParticipants,
+    afterRevisions,
   };
 }
 
