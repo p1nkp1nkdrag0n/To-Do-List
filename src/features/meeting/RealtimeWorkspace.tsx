@@ -12,6 +12,7 @@ interface DraftTask {
   ownerName: string;
   estimatedHours: number;
   dueDate: string | null;
+  dependsOnTitle?: string | null;
   ownerBasis?: "explicit" | "pronoun" | "unknown";
   ownerConfidence?: number;
 }
@@ -23,6 +24,7 @@ export interface ReviewTask {
   ownerUserId: string | null;
   estimatedHours: number;
   dueDate: string | null;
+  dependsOnTitle: string | null;
 }
 
 export interface RealtimeMember {
@@ -171,6 +173,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
               : null,
           estimatedHours: task.estimatedHours,
           dueDate: task.dueDate,
+          dependsOnTitle: task.dependsOnTitle ?? null,
         })),
       });
     } finally {
@@ -250,13 +253,22 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
           </div>
           <div className="realtime-review-list">
             {review.tasks.map((task, index) => (
-              <div className="realtime-review-row" key={index}>
+              <div className="realtime-review-item" key={index}>
+                <div className="realtime-review-row">
                 <input
                   className="realtime-review-title"
                   value={task.title}
                   onChange={(event) => {
                     const next = { ...review, tasks: [...review.tasks] };
-                    next.tasks[index] = { ...task, title: event.target.value };
+                    const previousTitle = task.title;
+                    const nextTitle = event.target.value;
+                    next.tasks[index] = { ...task, title: nextTitle };
+                    // 改标题时同步依赖引用，避免依赖指向旧标题。
+                    next.tasks = next.tasks.map((item) =>
+                      item.dependsOnTitle === previousTitle
+                        ? { ...item, dependsOnTitle: nextTitle }
+                        : item,
+                    );
                     setReview(next);
                   }}
                 />
@@ -295,12 +307,34 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                   className="link-button"
                   type="button"
                   onClick={() => {
+                    const removed = task.title;
                     const next = { ...review, tasks: review.tasks.filter((_, position) => position !== index) };
+                    // 删除前驱时清掉依赖，避免留下悬空引用。
+                    next.tasks = next.tasks.map((item) =>
+                      item.dependsOnTitle === removed ? { ...item, dependsOnTitle: null } : item,
+                    );
                     setReview(next);
                   }}
                 >
                   删除
                 </button>
+                </div>
+                {task.dependsOnTitle ? (
+                  <div className="realtime-review-dependency">
+                    依赖：{task.dependsOnTitle}
+                    <button
+                      className="link-button"
+                      type="button"
+                      onClick={() => {
+                        const next = { ...review, tasks: [...review.tasks] };
+                        next.tasks[index] = { ...task, dependsOnTitle: null };
+                        setReview(next);
+                      }}
+                    >
+                      移除依赖
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
