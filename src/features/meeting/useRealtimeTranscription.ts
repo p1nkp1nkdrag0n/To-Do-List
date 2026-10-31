@@ -44,6 +44,9 @@ export function useRealtimeTranscription(): RealtimeTranscription {
   const partialRef = useRef("");
   const generationRef = useRef(0);
   const stopTimerRef = useRef<number | undefined>(undefined);
+  // stop 已经清空 wsRef，但 socket 还要等 300ms 才关；这段时间内重开时，
+  // 必须还能拿到它并主动关闭，否则旧连接会一直挂着。
+  const closingSocketRef = useRef<WebSocket | undefined>(undefined);
 
   const clearStopTimer = useCallback(() => {
     if (stopTimerRef.current !== undefined) {
@@ -68,6 +71,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     cleanupAudio();
     const socket = wsRef.current;
     wsRef.current = undefined;
+    closingSocketRef.current = socket;
     if (socket !== undefined) {
       try {
         socket.close();
@@ -90,6 +94,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
 
     const socket = wsRef.current;
     wsRef.current = undefined;
+    closingSocketRef.current = socket;
     if (socket !== undefined) {
       try {
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "stop" }));
@@ -99,6 +104,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
       // 只关“停止时的那一个 socket”；新会话不会被旧计时器误关。
       stopTimerRef.current = window.setTimeout(() => {
         stopTimerRef.current = undefined;
+        if (closingSocketRef.current === socket) closingSocketRef.current = undefined;
         try {
           socket.close();
         } catch {
@@ -132,8 +138,9 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     const generation = generationRef.current;
     clearStopTimer();
     // 上一次会话的 socket 可能还在 300ms 关闭窗口里；新会话开始时直接关掉它。
-    const previousSocket = wsRef.current;
+    const previousSocket = wsRef.current ?? closingSocketRef.current;
     wsRef.current = undefined;
+    closingSocketRef.current = undefined;
     if (previousSocket !== undefined) {
       try {
         previousSocket.close();
