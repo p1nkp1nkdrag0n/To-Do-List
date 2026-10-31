@@ -35,6 +35,11 @@ export interface ScheduleFixtureOptions {
   maxUploadBytes?: number;
   /** 指定后使用文件库，便于 HTTP→MCP 子进程共享同一个 SQLite。 */
   dbPath?: string;
+  /** 测试用：收集会议事件，断言失败时没有 session.finished。 */
+  publishMeetingEvent?: (
+    projectId: string,
+    event: { type: string; at: string; message: string; detail?: Record<string, unknown> },
+  ) => void;
 }
 
 export function createScheduleFixture(
@@ -52,6 +57,7 @@ export function createScheduleFixture(
     maxUploadBytes: options.maxUploadBytes,
     passwordHasher: async (password) => `test:${password}`,
     passwordVerifier: async (password, hash) => hash === `test:${password}`,
+    publishMeetingEvent: options.publishMeetingEvent,
   });
   let inviteSequence = 0;
 

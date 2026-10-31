@@ -23,6 +23,7 @@ describe("meeting HTTP → MCP atomic commit", () => {
   let leader: ScheduleTestUser;
   let projectId: string;
   let tempDir: string;
+  const events: Array<{ projectId: string; type: string }> = [];
   const previousEnv = {
     DB_PATH: process.env.DB_PATH,
     MCP_ENTRY: process.env.MCP_ENTRY,
@@ -35,7 +36,12 @@ describe("meeting HTTP → MCP atomic commit", () => {
     // 强制走 tsx 源码入口，避免本机旧 dist-server 被误用。
     process.env.MCP_ENTRY = "";
     process.env.MEETING_PACE_MS = "0";
-    fixture = createScheduleFixture({ dbPath: process.env.DB_PATH });
+    fixture = createScheduleFixture({
+      dbPath: process.env.DB_PATH,
+      publishMeetingEvent: (eventProjectId, event) => {
+        events.push({ projectId: eventProjectId, type: event.type });
+      },
+    });
     leader = await fixture.bootstrap();
     const project = await fixture.createProject(leader);
     projectId = project.id;
@@ -104,9 +110,15 @@ describe("meeting HTTP → MCP atomic commit", () => {
   }
 
   it("第二条合法 INSERT 触发数据库异常：任务/分工/依赖/活动/版本全部回滚", async () => {
-    const old = await runMeeting([task({ title: "旧任务" })]);
+    const oldFirst = task({ title: "旧任务 A" });
+    const oldSecond = task({
+      title: "旧任务 B",
+      predecessorClientTaskIds: [oldFirst.clientTaskId],
+    });
+    const old = await runMeeting([oldFirst, oldSecond]);
     expect(old.status).toBe(200);
     const before = snapshot();
+    expect(before.dependencies).toHaveLength(1);
 
     fixture.database.exec(
       `CREATE TRIGGER fail_second_http BEFORE INSERT ON tasks
@@ -114,6 +126,7 @@ describe("meeting HTTP → MCP atomic commit", () => {
        BEGIN SELECT RAISE(ABORT, 'forced http failure'); END;`,
     );
 
+    const eventMark = events.length;
     const response = await runMeeting([
       task({ title: "第一条" }),
       task({ title: "第二次失败" }),
@@ -122,6 +135,7 @@ describe("meeting HTTP → MCP atomic commit", () => {
     expect(response.status).toBe(400);
     expect(JSON.stringify(response.body)).toContain("forced http failure");
     expect(snapshot()).toEqual(before);
+    expect(events.slice(eventMark).some((event) => event.type === "session.finished")).toBe(false);
   });
 
   it("成员改名但 userId 不变：仍分给同一个人", async () => {
@@ -150,10 +164,10 @@ describe("meeting HTTP → MCP atomic commit", () => {
       memberUserIds: [member.id],
     });
     const leaveProjectId = project.body.project.id as string;
-    fixture.database.run(
-      "UPDATE project_members SET removed_at = ? WHERE project_id = ? AND user_id = ?",
-      [new Date().toISOString(), leaveProjectId, member.id],
-    );
+    const oldTask = await leader.agent
+      .post(`/api/projects/${leaveProjectId}/tasks`)
+      .send({ title: "退组前的旧任务" });
+    expect(oldTask.status).toBe(201);
     const before = fixture.database.all(
       "SELECT id, title FROM tasks WHERE project_id = ? ORDER BY id",
       [leaveProjectId],
@@ -162,6 +176,10 @@ describe("meeting HTTP → MCP atomic commit", () => {
       "SELECT schedule_revision FROM projects WHERE id = ?",
       [leaveProjectId],
     )!.schedule_revision;
+    fixture.database.run(
+      "UPDATE project_members SET removed_at = ? WHERE project_id = ? AND user_id = ?",
+      [new Date().toISOString(), leaveProjectId, member.id],
+    );
 
     const response = await leader.agent.post("/api/meeting/run").send({
       projectId: leaveProjectId,
@@ -187,4 +205,38 @@ describe("meeting HTTP → MCP atomic commit", () => {
       ]),
     ).toEqual(before);
   });
+
+  it("版本已推进但成员仍有效：旧候选被拒绝，旧排期保留", async () => {
+    await runMeeting([task({ title: "旧排期" })]);
+    const currentRevision = fixture.database.get<{ schedule_revision: number }>(
+      "SELECT schedule_revision FROM projects WHERE id = ?",
+      [projectId],
+    )!.schedule_revision;
+    const beforeTasks = fixture.database.all(
+      "SELECT id, title FROM tasks WHERE project_id = ? ORDER BY id",
+      [projectId],
+    );
+    fixture.database.run(
+      "UPDATE projects SET schedule_revision = schedule_revision + 1 WHERE id = ?",
+      [projectId],
+    );
+
+    const response = await leader.agent.post("/api/meeting/run").send({
+      projectId,
+      minutes: "旧版本提交",
+      lockOwners: true,
+      replaceSchedule: true,
+      expectedScheduleRevision: currentRevision,
+      tasks: [task({ title: "不应写入" })],
+    });
+
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(response.body)).toContain("重新确认");
+    expect(
+      fixture.database.all("SELECT id, title FROM tasks WHERE project_id = ? ORDER BY id", [
+        projectId,
+      ]),
+    ).toEqual(beforeTasks);
+  });
+
 });
