@@ -46,6 +46,14 @@
 
 v2 是一次性重建版本，不读取或迁移 v1 业务数据。上线前请离线保留旧构建和旧数据库。
 
+## 成果索引
+
+- 技术报告：[Word](docs/会议排期系统技术报告.docx) · [PDF](docs/会议排期系统技术报告.pdf)
+- 验证记录：[验证清单](docs/验证清单.md)
+- 发布说明：[release-notes.md](release-notes.md)
+- 关键截图：[实时工作区](docs/images/realtime-workspace.png) · [确认清单](docs/images/task-confirmation.png) · [资料库](docs/images/resource-library.png)
+- 可执行文件：GitHub Releases 中的 `ToDoList-f960-交付版.exe`（125 MB，不进入 Git 历史）
+
 ## 会议 → 排期（本次新增）
 
 把一段会议纪要（或 txt / docx / pdf 文件）变成真实排期，并自动修复冲突：
