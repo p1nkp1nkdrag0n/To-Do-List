@@ -23,14 +23,18 @@ namespace ToDoListLauncher
                 // 放到「程序目录的同级」，那里刚刚验证过可写。
                 string tempZip = Path.Combine(
                     extractionRoot,
-                    "payload-" + Guid.NewGuid().ToString("N") + ".zip");
+                    "p-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".zip");
                 using (Stream payload = Assembly.GetExecutingAssembly()
                     .GetManifestResourceStream("payload.zip"))
                 {
                     if (payload == null) throw new Exception("程序包损坏：找不到内嵌资源。");
                     string fingerprint = Fingerprint(payload);
-                    target = Path.Combine(extractionRoot, "versions", fingerprint);
+                    // Windows 默认 MAX_PATH 260：完整 64 位指纹会把 node_modules 深层路径顶爆。
+                    // 目录只用前 12 位；完整 SHA256 仍写在 .extracted 里做校验。
+                    target = Path.Combine(extractionRoot, "v", fingerprint.Substring(0, 8));
                     marker = Path.Combine(target, ".extracted");
+                    Console.WriteLine("[stage] extractionRoot=" + extractionRoot + " len=" + extractionRoot.Length);
+                    Console.WriteLine("[stage] target=" + target + " len=" + target.Length);
                     string installed = File.Exists(marker) ? File.ReadAllText(marker).Trim() : "";
 
                     if (installed != fingerprint)
@@ -43,18 +47,35 @@ namespace ToDoListLauncher
                         {
                             payload.CopyTo(zipFile);
                         }
-                        // Never delete an earlier installation: older launchers could store
-                        // user data inside it. Extract into a fresh staging directory instead.
-                        string staging = target + ".staging-" + Guid.NewGuid().ToString("N");
+                        // staging 也必须在短目录下：target + ".staging-" + 32 位 GUID 会再次超限。
+                        string staging = Path.Combine(
+                            extractionRoot,
+                            "s-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+                        Console.WriteLine("[stage] staging=" + staging + " len=" + staging.Length);
                         Directory.CreateDirectory(staging);
-                        int count = Extract(tempZip, staging);
-                        string missing = MissingSentinel(staging);
-                        if (missing.Length != 0)
-                            throw new Exception("解压不完整（缺少 " + missing + "）。原版本和数据未被修改。");
-                        File.WriteAllText(Path.Combine(staging, ".extracted"), fingerprint);
-                        if (Directory.Exists(target))
-                            throw new Exception("目标版本目录已存在但校验标记不符；为保护数据，未覆盖：" + target);
-                        Directory.Move(staging, target);
+                        int count;
+                        try
+                        {
+                            Console.WriteLine("[stage] extract begin");
+                            count = Extract(tempZip, staging);
+                            Console.WriteLine("[stage] extract done count=" + count);
+                            string missing = MissingSentinel(staging);
+                            if (missing.Length != 0)
+                                throw new Exception("解压不完整（缺少 " + missing + "）。原版本和数据未被修改。");
+                            File.WriteAllText(Path.Combine(staging, ".extracted"), fingerprint);
+                            if (Directory.Exists(target))
+                                throw new Exception("目标版本目录已存在但校验标记不符；为保护数据，未覆盖：" + target);
+                            // staging 是 sibling 目录，不会顺带创建 target 的父目录。
+                            Directory.CreateDirectory(Path.GetDirectoryName(target));
+                            Console.WriteLine("[stage] move begin");
+                            Directory.Move(staging, target);
+                            Console.WriteLine("[stage] move done");
+                        }
+                        catch
+                        {
+                            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+                            throw;
+                        }
                         Console.WriteLine("准备完成（解压 " + count + " 个文件）。");
                         File.Delete(tempZip);
                     }
@@ -96,7 +117,7 @@ namespace ToDoListLauncher
             {
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("启动失败：" + error.Message);
-                Console.Error.WriteLine("详情：" + error.GetType().Name);
+                Console.Error.WriteLine("详情：" + error.ToString());
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("按任意键退出…");
                 Console.ReadKey(true);
@@ -116,6 +137,12 @@ namespace ToDoListLauncher
                     if (!destination.StartsWith(Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                     {
                         continue; // 防目录穿越
+                    }
+                    if (destination.Length > 250)
+                    {
+                        throw new Exception(
+                            "解压路径超过 Windows 260 字符限制，请把 ToDoList.exe 放到更短的目录（例如 D:\\ToDoList）后重试。\n" +
+                            "最长路径：" + destination);
                     }
                     if (string.IsNullOrEmpty(entry.Name))
                     {

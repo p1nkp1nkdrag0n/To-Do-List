@@ -19,7 +19,21 @@ const serverEntry = path.join(appRoot, "dist-server", "server", "v2.js");
 const mcpEntry = path.join(appRoot, "dist-server", "server", "mcp", "main.js");
 
 const programRoot = path.resolve(here, "..");
-const dataRoot = pickDataRoot({ programRoot });
+let dataRoot;
+try {
+  dataRoot = pickDataRoot({ programRoot });
+} catch (error) {
+  // AppData 被权限/组策略禁用时，回退到 exe 同级持久目录；旧数据检测仍会执行，
+  // 不会因为回退就静默打开另一份空库。
+  const exeDir = process.env.TODOLIST_EXE_DIR;
+  if (!exeDir) throw error;
+  const fallback = path.join(exeDir, "ToDoList-data");
+  dataRoot = pickDataRoot({
+    programRoot,
+    env: { ...process.env, TODOLIST_DATA_ROOT: fallback },
+  });
+  console.log("AppData 不可写，改用 exe 同级数据目录：" + dataRoot);
+}
 // Do not silently open an empty database when a previous unsafe fallback exists.
 if (!process.env.TODOLIST_MIGRATE_FROM) {
   const legacyRoots = findLegacyDataRoots({ destination: dataRoot, programRoot });
