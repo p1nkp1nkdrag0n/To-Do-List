@@ -319,22 +319,50 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                   删除
                 </button>
                 </div>
-                {task.dependsOnTitle ? (
-                  <div className="realtime-review-dependency">
-                    依赖：{task.dependsOnTitle}
-                    <button
-                      className="link-button"
-                      type="button"
-                      onClick={() => {
-                        const next = { ...review, tasks: [...review.tasks] };
-                        next.tasks[index] = { ...task, dependsOnTitle: null };
-                        setReview(next);
-                      }}
-                    >
-                      移除依赖
-                    </button>
-                  </div>
-                ) : null}
+                <div className="realtime-review-dependency">
+                  {task.dependsOnTitle ? (
+                    <>
+                      依赖：{task.dependsOnTitle}
+                      <button
+                        className="link-button"
+                        type="button"
+                        onClick={() => {
+                          const next = { ...review, tasks: [...review.tasks] };
+                          next.tasks[index] = { ...task, dependsOnTitle: null };
+                          setReview(next);
+                        }}
+                      >
+                        移除依赖
+                      </button>
+                    </>
+                  ) : (
+                    <span>无依赖</span>
+                  )}
+                  <select
+                    className="realtime-review-dependency-select"
+                    value=""
+                    aria-label={`为「${task.title}」添加依赖`}
+                    onChange={(event) => {
+                      if (event.target.value === "") return;
+                      const next = { ...review, tasks: [...review.tasks] };
+                      next.tasks[index] = { ...task, dependsOnTitle: event.target.value };
+                      setReview(next);
+                    }}
+                  >
+                    <option value="">+ 添加依赖…</option>
+                    {review.tasks
+                      .filter(
+                        (candidate) =>
+                          candidate.title !== task.title &&
+                          candidate.title !== task.dependsOnTitle,
+                      )
+                      .map((candidate) => (
+                        <option key={candidate.clientTaskId} value={candidate.title}>
+                          等待「{candidate.title}」完成
+                        </option>
+                      ))}
+                  </select>
+                </div>
               </div>
             ))}
           </div>
