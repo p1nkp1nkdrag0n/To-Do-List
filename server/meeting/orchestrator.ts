@@ -59,11 +59,6 @@ export interface OrchestratorOptions {
   expectedScheduleRevision?: number;
   /** true 表示走 replace_schedule 单事务重建。 */
   replaceSchedule?: boolean;
-  /**
-   * 纪要解析成功、任务即将创建之前调用（用于「按纪要重建」时清空旧排期）。
-   * 解析失败不会调用，所以坏纪要不会提前把旧排期删掉。
-   */
-  beforeCreateTasks?: () => number;
 }
 
 interface PlanSummary {
@@ -529,204 +524,110 @@ export class MeetingOrchestrator {
         throw new Error(`没能从这段纪要里抽出任务。\n${hints.join("\n")}`);
       }
 
-      // 2.5 确认清单走批量提交：一个事务删旧 + 建新，失败旧排期不动。
-      if (
-        this.options.replaceSchedule === true &&
-        this.options.confirmedTasks !== undefined &&
-        this.options.expectedScheduleRevision !== undefined
-      ) {
-        const batchTasks = extraction.tasks as Array<
-          ExtractedTask & {
-            clientTaskId?: string;
-            ownerUserId?: string | null;
-            predecessorClientTaskIds?: string[];
-          }
-        >;
-        const candidates = batchTasks.map((task, index) => {
-          const userId =
-            task.ownerUserId ??
-            (task.ownerName === "未分配" ? undefined : memberByName.get(task.ownerName));
-          if (userId === undefined && task.ownerName !== "未分配") {
+      // 2.5 所有会议路径统一走 replace_schedule：确认清单与抽取结果都先变成候选任务。
+      const batchTasks = extraction.tasks as Array<
+        ExtractedTask & {
+          clientTaskId?: string;
+          ownerUserId?: string | null;
+          predecessorClientTaskIds?: string[];
+        }
+      >;
+      const memberIdsByName = new Map<string, string[]>();
+      for (const member of members) {
+        const list = memberIdsByName.get(member.displayName) ?? [];
+        list.push(member.userId);
+        memberIdsByName.set(member.displayName, list);
+      }
+      const memberIds = new Set(members.map((member) => member.userId));
+      const idsByTitle = new Map<string, string[]>();
+      batchTasks.forEach((task, index) => {
+        const clientTaskId = task.clientTaskId ?? `task-${index}`;
+        const list = idsByTitle.get(task.title) ?? [];
+        list.push(clientTaskId);
+        idsByTitle.set(task.title, list);
+      });
+
+      const candidates = batchTasks.map((task, index) => {
+        const clientTaskId = task.clientTaskId ?? `task-${index}`;
+        let ownerUserId = task.ownerUserId ?? null;
+        if (ownerUserId === null && task.ownerName !== "未分配") {
+          const matches = memberIdsByName.get(task.ownerName) ?? [];
+          if (matches.length === 0) {
             throw new Error(`负责人「${task.ownerName}」不在当前项目成员里，整批未提交。`);
           }
-          const rawDue = task.dueDate ?? null;
-          const dueDate = rawDue === null || rawDue < today ? addDays(today, 7) : rawDue;
-          const clientTaskId = task.clientTaskId ?? `task-${index}`;
-          return {
-            clientTaskId,
-            title: task.title,
-            ownerUserId: userId ?? null,
-            estimatedMinutes: Math.round(task.estimatedHours * 60),
-            startDate: today,
-            dueDate,
-            predecessorClientTaskIds:
-              task.predecessorClientTaskIds ??
-              (task.dependsOnTitle === undefined || task.dependsOnTitle === null
-                ? []
-                : batchTasks
-                    .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
-                    .filter(
-                      ({ candidate }) =>
-                        candidate.title.includes(task.dependsOnTitle!) ||
-                        task.dependsOnTitle!.includes(candidate.title),
-                    )
-                    .map(({ candidateIndex }) =>
-                      (batchTasks[candidateIndex] as { clientTaskId?: string }).clientTaskId ??
-                      `task-${candidateIndex}`,
-                    )),
-          };
-        });
+          if (matches.length > 1) {
+            throw new Error(`成员姓名「${task.ownerName}」重名，请在确认面板里显式选择负责人。`);
+          }
+          ownerUserId = matches[0]!;
+        }
+        if (ownerUserId !== null && !memberIds.has(ownerUserId)) {
+          throw new Error("负责人已不是当前项目成员，整批未提交。");
+        }
 
-        const outcome = await this.callTool(
-          client,
-          "replace_schedule",
-          {
-            projectId,
-            expectedScheduleRevision: this.options.expectedScheduleRevision,
-            replaceSchedule: true,
-            tasks: candidates,
-          },
-          (payload) => `已提交 ${String(payload.count ?? candidates.length)} 条任务`,
-        );
-        requireToolOk(outcome, "replace_schedule");
-        const taskIds = (outcome.payload.taskIds as string[]) ?? [];
-        const created = candidates.map((candidate, index) => ({
-          task: batchTasks[index]!,
-          taskId: taskIds[index] ?? "",
-        }));
-        this.options.onDataChanged?.(projectId);
-        this.emit({
-          type: "plan.ready",
-          at: new Date().toISOString(),
-          message: `已在一个事务内把 ${created.length} 条待办写进排期，开始检查冲突`,
-          detail: {
-            tasks: created.map((item) => ({
-              title: item.task.title,
-              owner: item.task.ownerName,
-              hours: item.task.estimatedHours,
-            })),
-          },
-        });
-        return this.resolveConflicts(client);
-      }
-
-      // 2.5 解析成功后才清空旧排期；解析失败会在上面直接抛错，旧数据不受影响。
-      const removedTasks = this.options.beforeCreateTasks?.() ?? 0;
-      if (this.options.beforeCreateTasks !== undefined) {
-        this.emit({
-          type: "tool.call",
-          at: new Date().toISOString(),
-          tool: "clear_schedule",
-          status: "ok",
-          argumentsSummary: "按纪要重建",
-          resultSummary: removedTasks > 0 ? `清空 ${removedTasks} 个旧任务` : "原本没有排期",
-          durationMs: 0,
-          message:
-            removedTasks > 0
-              ? `已清空原有排期（${removedTasks} 个任务），按纪要重建`
-              : "当前排期为空，按纪要新建",
-        });
-      }
-
-      // 3. 建任务 + 派人
-      const created: Array<{ task: ExtractedTask; taskId: string }> = [];
-      let adjustedDates = 0;
-      let unassignedCount = 0;
-      for (const task of extraction.tasks) {
-        const userId =
-          task.ownerName === "未分配" ? undefined : memberByName.get(task.ownerName);
-        if (userId === undefined && task.ownerName !== "未分配") continue;
-        // 纪要里的日期可能是过去的（比如 4 月的会、写着「5.1 之前」）。
-        // 落库前统一挪到未来：过去的日期会让 startDate > dueDate，直接违反约束。
+        let predecessorClientTaskIds = task.predecessorClientTaskIds ?? [];
+        if (predecessorClientTaskIds.length === 0 && task.dependsOnTitle) {
+          const exact = idsByTitle.get(task.dependsOnTitle) ?? [];
+          if (exact.length > 1) {
+            throw new Error(`依赖标题「${task.dependsOnTitle}」对应多个任务，无法确定前驱。`);
+          }
+          if (exact.length === 1) {
+            predecessorClientTaskIds = exact;
+          } else {
+            const fuzzy = batchTasks
+              .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+              .filter(({ candidate }) => candidate.title !== task.title)
+              .filter(
+                ({ candidate }) =>
+                  candidate.title.includes(task.dependsOnTitle!) ||
+                  task.dependsOnTitle!.includes(candidate.title),
+              );
+            if (fuzzy.length !== 1) {
+              throw new Error(`依赖标题「${task.dependsOnTitle}」无法唯一匹配到前驱任务。`);
+            }
+            predecessorClientTaskIds = [
+              batchTasks[fuzzy[0]!.candidateIndex]!.clientTaskId ??
+                `task-${fuzzy[0]!.candidateIndex}`,
+            ];
+          }
+        }
+        if (predecessorClientTaskIds.includes(clientTaskId)) {
+          throw new Error(`任务「${task.title}」不能依赖自己。`);
+        }
         const rawDue = task.dueDate ?? null;
-        const dueDate =
-          rawDue === null || rawDue < today ? addDays(today, 7) : rawDue;
-        if (rawDue !== null && rawDue < today) adjustedDates += 1;
-        const createdTask = await this.callTool(
-          client,
-          "create_task",
-          { projectId, title: task.title, startDate: today, dueDate },
-          (payload) => `已建「${String(payload.title ?? task.title)}」`,
-        );
-        requireToolOk(createdTask, "create_task");
-        const taskId = String(createdTask.payload.taskId ?? "");
-        if (taskId === "") {
-          throw new Error("create_task 没有返回 taskId，已终止本次处理。");
-        }
+        const dueDate = rawDue === null || rawDue < today ? addDays(today, 7) : rawDue;
+        return {
+          clientTaskId,
+          title: task.title,
+          ownerUserId,
+          estimatedMinutes: Math.round(task.estimatedHours * 60),
+          startDate: today,
+          dueDate,
+          predecessorClientTaskIds,
+        };
+      });
 
-        if (userId !== undefined) {
-          const assigned = await this.callTool(
-            client,
-            "assign_member",
-            {
-              projectId,
-              taskId,
-              userId,
-              startDate: today,
-              endDate: dueDate,
-              estimatedHours: task.estimatedHours,
-            },
-            (payload) => String(payload.summary ?? "已分配"),
-          );
-          requireToolOk(assigned, "assign_member");
-        } else {
-          unassignedCount += 1;
-        }
-        created.push({ task, taskId });
-      }
-      if (adjustedDates > 0) {
-        this.emit({
-          type: "tool.call",
-          at: new Date().toISOString(),
-          tool: "normalize_dates",
-          status: "ok",
-          argumentsSummary: `${adjustedDates} 条日期已在过去`,
-          resultSummary: `已把它们顺延到今天 +7 天`,
-          durationMs: 0,
-          message: `有 ${adjustedDates} 条任务的日期已经过去，已顺延到本周内`,
-        });
-      }
+      const outcome = await this.callTool(
+        client,
+        "replace_schedule",
+        {
+          projectId,
+          expectedScheduleRevision: this.options.expectedScheduleRevision,
+          replaceSchedule: this.options.replaceSchedule !== false,
+          tasks: candidates,
+        },
+        (payload) => `已提交 ${String(payload.count ?? candidates.length)} 条任务`,
+      );
+      requireToolOk(outcome, "replace_schedule");
+      const taskIds = (outcome.payload.taskIds as string[]) ?? [];
+      const created = candidates.map((candidate, index) => ({
+        task: batchTasks[index]!,
+        taskId: taskIds[index] ?? "",
+      }));
       this.options.onDataChanged?.(projectId);
-
-      if (unassignedCount > 0) {
-        this.emit({
-          type: "tool.call",
-          at: new Date().toISOString(),
-          tool: "unassigned_tasks",
-          status: "ok",
-          argumentsSummary: `${unassignedCount} 条任务没写负责人`,
-          resultSummary: "已建好，等待手动指派",
-          durationMs: 0,
-          message: `纪要里有 ${unassignedCount} 条任务没写负责人，任务已建好，去甘特图里指派即可`,
-        });
-      }
-
-      // 4. 依赖（放在建完之后，按标题匹配）
-      for (const item of created) {
-        const dependencyTitle = item.task.dependsOnTitle;
-        if (dependencyTitle === undefined || dependencyTitle === null) continue;
-        const predecessor = created.find((candidate) =>
-          candidate.task.title.includes(dependencyTitle) ||
-          dependencyTitle.includes(candidate.task.title),
-        );
-        if (predecessor === undefined) continue;
-        const dependencyOutcome = await this.callTool(
-          client,
-          "set_dependency",
-          {
-            projectId,
-            predecessorTaskId: predecessor.taskId,
-            successorTaskId: item.taskId,
-          },
-          () => `「${item.task.title}」依赖「${predecessor.task.title}」`,
-        );
-        requireToolOk(dependencyOutcome, "set_dependency");
-      }
-
       this.emit({
         type: "plan.ready",
         at: new Date().toISOString(),
-        message: `已把 ${created.length} 条待办写进排期，开始检查冲突`,
+        message: `已在一个事务内把 ${created.length} 条待办写进排期，开始检查冲突`,
         detail: {
           tasks: created.map((item) => ({
             title: item.task.title,
@@ -735,7 +636,6 @@ export class MeetingOrchestrator {
           })),
         },
       });
-
       return this.resolveConflicts(client);
     });
 

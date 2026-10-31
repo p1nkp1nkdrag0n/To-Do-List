@@ -34,7 +34,7 @@ interface RealtimeWorkspaceProps {
   projectId: string;
   members: RealtimeMember[];
   onExit: () => void;
-  onFinish: (text: string, tasks: ReviewTask[]) => Promise<boolean>;
+  onFinish: (text: string, tasks: ReviewTask[], scheduleRevision: number) => Promise<boolean>;
 }
 
 export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: RealtimeWorkspaceProps) {
@@ -49,7 +49,11 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
   const [seconds, setSeconds] = useState(0);
   const [finishing, setFinishing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [review, setReview] = useState<{ text: string; tasks: ReviewTask[] } | null>(null);
+  const [review, setReview] = useState<{
+    text: string;
+    tasks: ReviewTask[];
+    scheduleRevision: number;
+  } | null>(null);
   const [submitError, setSubmitError] = useState("");
   const draftTimer = useRef<number | undefined>(undefined);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
@@ -139,21 +143,32 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
         .catch(() => transcript);
       // 先按最终文本抽一份任务清单，让用户确认后再建排期。
       const draft = await api
-        .post<{ tasks: ReviewTask[] }>("/api/meeting/draft", { projectId, minutes: corrected })
-        .then((result) => result.tasks)
-        .catch(() => []);
-      if (draft.length === 0) {
-        const ok = await onFinish(corrected, []);
+        .post<{ tasks: DraftTask[]; scheduleRevision: number }>("/api/meeting/draft", {
+          projectId,
+          minutes: corrected,
+        })
+        .then((result) => result)
+        .catch(() => null);
+      if (draft === null) {
+        setSubmitError("任务草稿生成失败，请重试。");
+        return;
+      }
+      if (draft.tasks.length === 0) {
+        const ok = await onFinish(corrected, [], draft.scheduleRevision);
         if (!ok) setSubmitError("提交失败：排期没有生成，请重试。");
         return;
       }
       setReview({
         text: corrected,
-        tasks: draft.map((task, index) => ({
+        scheduleRevision: draft.scheduleRevision,
+        tasks: draft.tasks.map((task, index) => ({
           clientTaskId: `review-${Date.now()}-${index}`,
           title: task.title,
           ownerName: task.ownerName,
-          ownerUserId: members.find((member) => member.displayName === task.ownerName)?.userId ?? null,
+          ownerUserId:
+            members.filter((member) => member.displayName === task.ownerName).length === 1
+              ? members.find((member) => member.displayName === task.ownerName)!.userId
+              : null,
           estimatedHours: task.estimatedHours,
           dueDate: task.dueDate,
         })),
@@ -303,7 +318,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                 void (async () => {
                   setSubmitting(true);
                   try {
-                    const ok = await onFinish(review.text, review.tasks);
+                    const ok = await onFinish(review.text, review.tasks, review.scheduleRevision);
                     if (!ok) {
                       setSubmitError("提交失败，任务清单与编辑内容已保留，可直接重试。");
                     }

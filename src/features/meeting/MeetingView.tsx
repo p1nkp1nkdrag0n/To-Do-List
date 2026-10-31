@@ -333,7 +333,11 @@ export function MeetingView({
   }, [currentUserId, projectId]);
 
   /** 从粘贴的会议纪要开始：抽任务 → 建库 → 排期 → 修复，全自动。 */
-  const startFromMinutes = useCallback(async (override?: string, confirmedTasks?: ReviewTask[]): Promise<boolean> => {
+  const startFromMinutes = useCallback(async (
+    override?: string,
+    confirmedTasks?: ReviewTask[],
+    expectedScheduleRevision?: number,
+  ): Promise<boolean> => {
     const trimmed = (override ?? minutesText).trim();
     if (trimmed === "") return false;
     setMinutesOpen(false);
@@ -363,6 +367,7 @@ export function MeetingView({
         minutes: trimmed,
         lockOwners,
         replaceSchedule,
+        ...(expectedScheduleRevision !== undefined ? { expectedScheduleRevision } : {}),
         ...(confirmedTasks !== undefined && confirmedTasks.length > 0 ? { tasks: confirmedTasks } : {}),
       });
       setRun(result);
@@ -671,10 +676,10 @@ export function MeetingView({
           projectId={project.project.id}
           members={project.members.map((member) => ({ userId: member.userId, displayName: member.displayName }))}
           onExit={() => setRealtimeMode(false)}
-          onFinish={async (text, tasks) => {
+          onFinish={async (text, tasks, scheduleRevision) => {
             setMinutesText(text);
             setInputMode("minutes");
-            const ok = await startFromMinutes(text, tasks);
+            const ok = await startFromMinutes(text, tasks, scheduleRevision);
             if (ok) {
               setRealtimeMode(false);
               void saveMeetingSummary(text, tasks);

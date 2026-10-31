@@ -87,6 +87,7 @@ const RunWithMinutesSchema = z
     minutes: z.string().max(200_000).optional(),
     lockOwners: z.boolean().optional(),
     replaceSchedule: z.boolean().optional(),
+    expectedScheduleRevision: z.number().int().positive().optional(),
     // 确认面板确认过的任务：有这份清单就不再重新抽取。
     tasks: z
       .array(
@@ -182,10 +183,14 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.post(
     "/run",
     asyncRoute(async (request, response) => {
-      const { projectId, minutes, lockOwners, replaceSchedule, tasks } = parseRequestBody(
-        RunWithMinutesSchema,
-        request,
-      );
+      const {
+        projectId,
+        minutes,
+        lockOwners,
+        replaceSchedule,
+        expectedScheduleRevision,
+        tasks,
+      } = parseRequestBody(RunWithMinutesSchema, request);
       const auth = response.locals.auth;
 
       // 只有项目成员能触发；编排器本身用 MCP 的固定身份跑，但入口必须先过权限。
@@ -207,7 +212,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       const orchestratorOptions: ConstructorParameters<typeof MeetingOrchestrator>[0] = {
         projectId,
         confirmedTasks: tasks,
-        expectedScheduleRevision: scheduleRow?.schedule_revision,
+        expectedScheduleRevision: expectedScheduleRevision ?? scheduleRow?.schedule_revision,
         replaceSchedule: replaceSchedule === true,
         control,
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
@@ -240,19 +245,8 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       const orchestrator = new MeetingOrchestrator(orchestratorOptions);
 
       const trimmed = minutes?.trim() ?? "";
-      let clearedTasks = 0;
-      // 「按纪要重建」的清理交给编排器：只有纪要解析成功、任务即将创建时才删旧排期。
-      // 解析失败会直接抛错，旧排期原样保留。
-      const clearOnSuccess =
-        trimmed !== "" && replaceSchedule === true
-          ? () => {
-              clearedTasks = clearProjectSchedule(dependencies, projectId).removedTasks;
-              return clearedTasks;
-            }
-          : undefined;
-      if (clearOnSuccess !== undefined) {
-        orchestratorOptions.beforeCreateTasks = clearOnSuccess;
-      }
+      // 删旧与建新都在 replace_schedule 的同一个事务里完成。
+      const clearedTasks = 0;
       let result;
       try {
         result =
@@ -363,7 +357,15 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       hotwords: memberNames,
     });
     const extraction = await extractTasksFromText(corrected, memberNames, auth.user.id);
-    response.json({ tasks: extraction.tasks, warnings: extraction.warnings });
+    const revision = dependencies.database.get<{ schedule_revision: number }>(
+      "SELECT schedule_revision FROM projects WHERE id = ? AND deleted_at IS NULL",
+      [projectId],
+    )?.schedule_revision;
+    response.json({
+      tasks: extraction.tasks,
+      warnings: extraction.warnings,
+      scheduleRevision: revision,
+    });
   }));
 
   /** 生成会议纪要，并（默认）存档到资料库。 */
