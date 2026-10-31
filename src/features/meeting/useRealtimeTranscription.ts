@@ -11,6 +11,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { socketsToClose } from "./realtime-sockets.js";
+
 export type RealtimeStatus = "idle" | "connecting" | "live" | "error";
 
 export interface RealtimeTranscription {
@@ -66,20 +68,25 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     pendingRef.current = new Float32Array(0);
   }, []);
 
+  const closeSocket = useCallback((socket: WebSocket | undefined) => {
+    if (socket === undefined) return;
+    try {
+      socket.close();
+    } catch {
+      // 已关闭则忽略。
+    }
+  }, []);
+
   const cleanupAll = useCallback(() => {
+    // 先取出两个引用，再清空；stop 可能已经把 wsRef 清掉、把 socket 放进 closing。
+    const active = wsRef.current;
+    const closing = closingSocketRef.current;
+    wsRef.current = undefined;
+    closingSocketRef.current = undefined;
     clearStopTimer();
     cleanupAudio();
-    const socket = wsRef.current;
-    wsRef.current = undefined;
-    closingSocketRef.current = socket;
-    if (socket !== undefined) {
-      try {
-        socket.close();
-      } catch {
-        // 已关闭则忽略。
-      }
-    }
-  }, [cleanupAudio, clearStopTimer]);
+    for (const socket of socketsToClose(active, closing)) closeSocket(socket);
+  }, [cleanupAudio, clearStopTimer, closeSocket]);
 
   const pushLine = useCallback((raw: string) => {
     const text = raw.trim();
@@ -92,7 +99,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     generationRef.current += 1;
     clearStopTimer();
 
-    const socket = wsRef.current;
+    const socket = wsRef.current ?? closingSocketRef.current;
     wsRef.current = undefined;
     closingSocketRef.current = socket;
     if (socket !== undefined) {
