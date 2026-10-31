@@ -48,6 +48,7 @@ function sessionFor(id: string, username: string, displayName: string, now: Date
 
 interface Fixture {
   database: V2Database;
+  dbPath: string;
   projectId: string;
   lead: AuthenticatedSession;
   ownerId: string;
@@ -65,7 +66,8 @@ function buildFixture(): Fixture {
   const now = new Date();
   const today = todayInShanghai(now);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-meeting-commit-"));
-  const database = openV2Database(path.join(directory, "app.sqlite"));
+  const dbPath = path.join(directory, "app.sqlite");
+  const database = openV2Database(dbPath);
   openDatabases.push(database);
   migrateV2Database(database, () => now.toISOString());
 
@@ -110,6 +112,7 @@ function buildFixture(): Fixture {
 
   return {
     database,
+    dbPath,
     projectId: project.project.id,
     lead,
     ownerId,
@@ -247,4 +250,103 @@ describe("commitMeetingTasks", () => {
 
     expect(() => commit(fixture, [candidate(fixture)], true, stale)).toThrow(/重新确认/);
   });
+
+  it("合法输入写到第二条时数据库异常：任务、分工、依赖、活动、版本全部回滚", () => {
+    const fixture = buildFixture();
+    commit(fixture, [candidate(fixture, { title: "旧任务" })]);
+    const beforeTasks = fixture.database.all(
+      "SELECT id, title FROM tasks WHERE project_id = ? ORDER BY id",
+      [fixture.projectId],
+    );
+    const beforeParticipants = fixture.database.all(
+      "SELECT id FROM task_participants WHERE project_id = ? ORDER BY id",
+      [fixture.projectId],
+    );
+    const beforeDependencies = fixture.database.all(
+      "SELECT id FROM task_dependencies WHERE project_id = ? ORDER BY id",
+      [fixture.projectId],
+    );
+    const beforeActivities = fixture.database.get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM activity_log WHERE project_id = ?",
+      [fixture.projectId],
+    )!.count;
+    const beforeRevision = scheduleRevision(fixture);
+
+    // 合法候选，但数据库在第二条 INSERT 时抛错：证明不是“负工时”这种参数校验。
+    fixture.database.exec(
+      `CREATE TRIGGER fail_second_task BEFORE INSERT ON tasks
+       WHEN NEW.title = '数据库异常任务'
+       BEGIN SELECT RAISE(ABORT, 'forced database failure'); END;`,
+    );
+
+    expect(() =>
+      commit(fixture, [
+        candidate(fixture, { title: "正常任务" }),
+        candidate(fixture, { title: "数据库异常任务" }),
+      ]),
+    ).toThrow(/forced database failure/);
+
+    expect(
+      fixture.database.all("SELECT id, title FROM tasks WHERE project_id = ? ORDER BY id", [
+        fixture.projectId,
+      ]),
+    ).toEqual(beforeTasks);
+    expect(
+      fixture.database.all("SELECT id FROM task_participants WHERE project_id = ? ORDER BY id", [
+        fixture.projectId,
+      ]),
+    ).toEqual(beforeParticipants);
+    expect(
+      fixture.database.all("SELECT id FROM task_dependencies WHERE project_id = ? ORDER BY id", [
+        fixture.projectId,
+      ]),
+    ).toEqual(beforeDependencies);
+    expect(
+      fixture.database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM activity_log WHERE project_id = ?",
+        [fixture.projectId],
+      )!.count,
+    ).toBe(beforeActivities);
+    expect(scheduleRevision(fixture)).toBe(beforeRevision);
+  });
+
+  it("另一个连接先提交并推进版本：旧批量请求被拒绝，新修改保留", () => {
+    const fixture = buildFixture();
+    const staleRevision = scheduleRevision(fixture);
+    const otherDatabase = openV2Database(fixture.dbPath);
+    openDatabases.push(otherDatabase);
+
+    const otherService = new ScheduleService(
+      resolveDependencies({
+        database: otherDatabase,
+        sessionSecret: "meeting-commit-test-secret-32-characters",
+        cookieSecure: false,
+        bootstrapCode: "meeting-commit-test-bootstrap",
+        clock: () => new Date(),
+      }),
+    );
+    const other = otherService.commitMeetingTasks(fixture.lead, fixture.projectId, {
+      projectId: fixture.projectId,
+      expectedScheduleRevision: staleRevision,
+      replaceSchedule: false,
+      tasks: [candidate(fixture, { title: "另一个连接的任务" })],
+    });
+
+    expect(() =>
+      commit(
+        fixture,
+        [candidate(fixture, { title: "旧批量任务" })],
+        true,
+        staleRevision,
+      ),
+    ).toThrow(/重新确认/);
+
+    const titles = fixture.database
+      .all<{ title: string }>("SELECT title FROM tasks WHERE project_id = ?", [fixture.projectId])
+      .map((row) => row.title);
+    expect(titles).toContain("另一个连接的任务");
+    expect(titles).not.toContain("旧批量任务");
+    expect(other.taskIds).toHaveLength(1);
+  });
+
 });
