@@ -1,3 +1,4 @@
+import { types as utilTypes } from "node:util";
 import type {
   ApplyTemplateRequest,
   CreateDependencyRequest,
@@ -6,6 +7,7 @@ import type {
   CreateParticipantRequest,
   CreatePhaseRequest,
   CreateRecurringRuleRequest,
+  CommitMeetingTasksRequest,
   CreateTaskRequest,
   FulfillDeliverableRequest,
   PatchDeliverableRequest,
@@ -474,6 +476,13 @@ function toTeamTemplate(row: TeamTemplateRow): TeamTemplateEntity {
   };
 }
 
+export interface ScheduleWriteUnit {
+  updateTask(id: string, input: PatchTaskRequest): { task: TaskEntity; scheduleRevision: number };
+  updateParticipant(id: string, input: PatchParticipantRequest): { participant: ParticipantEntity; scheduleRevision: number };
+  addParticipant(taskId: string, input: CreateParticipantRequest): { participant: ParticipantEntity; scheduleRevision: number };
+  deleteParticipant(id: string, revision: number): { deleted: true; scheduleRevision: number };
+}
+
 export class ScheduleService {
   constructor(protected readonly dependencies: V2RuntimeDependencies) {}
 
@@ -500,6 +509,35 @@ export class ScheduleService {
       deliverableRequirements: this.deliverableRows(projectId).map(toDeliverable),
       conflicts: new AvailabilityService(this.dependencies).projectConflicts(projectId),
     };
+  }
+
+  /**
+   * A synchronous, scoped write unit. Public single-write APIs still own their
+   * transactions; compound operations use these same validated internals.
+   * The facade cannot be retained and used after commit/rollback.
+   */
+  writeUnit<Result>(
+    auth: AuthenticatedSession,
+    projectId: string,
+    operation: (writes: ScheduleWriteUnit) => Result,
+  ): Result {
+    if (utilTypes.isAsyncFunction(operation)) throw new TypeError("Schedule write units must be synchronous.");
+    return this.dependencies.database.transaction<unknown>(() => {
+      this.requireProjectMember(auth, projectId);
+      const project = this.dependencies.database.get<{ archived_at: string | null }>(
+        "SELECT archived_at FROM projects WHERE id = ?", [projectId],
+      );
+      if (project?.archived_at !== null) throw new HttpError(409, "PROJECT_ARCHIVED", "The project is archived.");
+      let active = true;
+      const check = () => { if (!active) throw new Error("Schedule write unit has expired."); };
+      const writes: ScheduleWriteUnit = {
+        updateTask: (id, input) => { check(); return this.updateTaskInTransaction(auth, projectId, id, input); },
+        updateParticipant: (id, input) => { check(); return this.updateParticipantInTransaction(auth, projectId, id, input); },
+        addParticipant: (id, input) => { check(); return this.addParticipantInTransaction(auth, projectId, id, input); },
+        deleteParticipant: (id, revision) => { check(); return this.deleteParticipantInTransaction(auth, projectId, id, revision); },
+      };
+      try { return operation(writes); } finally { active = false; }
+    }) as Result;
   }
 
   listPhases(auth: AuthenticatedSession, projectId: string): PhaseEntity[] {
@@ -728,50 +766,59 @@ export class ScheduleService {
     projectId: string,
     input: CreateTaskRequest,
   ): { task: TaskEntity; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
-      this.requireProjectMember(auth, projectId);
-      this.validatePhaseReference(projectId, input.phaseId ?? null);
-      this.validateParentReference(projectId, input.parentId ?? null);
-      const id = this.dependencies.idGenerator();
-      const now = this.dependencies.clock().toISOString();
-      const position = input.position ?? this.nextPosition("tasks", projectId);
-      this.dependencies.database.run(
-        `INSERT INTO tasks
-          (id, project_id, phase_id, parent_id, title, description, position,
-           start_date, due_date, created_by, updated_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          projectId,
-          input.phaseId ?? null,
-          input.parentId ?? null,
-          input.title,
-          input.description ?? "",
-          position,
-          input.startDate ?? null,
-          input.dueDate ?? null,
-          auth.user.id,
-          auth.user.id,
-          now,
-          now,
-        ],
-      );
-      this.recomputeAncestors(
+    return this.dependencies.database.transaction(() =>
+      this.createTaskInTransaction(auth, projectId, input),
+    );
+  }
+
+  private createTaskInTransaction(
+    auth: AuthenticatedSession,
+    projectId: string,
+    input: CreateTaskRequest,
+  ): { task: TaskEntity; scheduleRevision: number } {
+    this.requireProjectMember(auth, projectId);
+    this.validatePhaseReference(projectId, input.phaseId ?? null);
+    this.validateParentReference(projectId, input.parentId ?? null);
+    const id = this.dependencies.idGenerator();
+    const now = this.dependencies.clock().toISOString();
+    const position = input.position ?? this.nextPosition("tasks", projectId);
+    this.dependencies.database.run(
+      `INSERT INTO tasks
+        (id, project_id, phase_id, parent_id, title, description, position,
+         start_date, due_date, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
         projectId,
+        input.phaseId ?? null,
         input.parentId ?? null,
+        input.title,
+        input.description ?? "",
+        position,
+        input.startDate ?? null,
+        input.dueDate ?? null,
+        auth.user.id,
         auth.user.id,
         now,
-      );
-      writeActivity(this.dependencies, {
-        projectId,
-        actorId: auth.user.id,
-        entityType: "task",
-        entityId: id,
-        action: "task.created",
-      });
-      const scheduleRevision = this.bumpScheduleRevision(projectId);
-      return { task: toTask(this.taskRow(projectId, id)!), scheduleRevision };
+        now,
+      ],
+    );
+    this.recomputeAncestors(
+      projectId,
+      input.parentId ?? null,
+      auth.user.id,
+      now,
+    );
+    writeActivity(this.dependencies, {
+      projectId,
+      actorId: auth.user.id,
+      entityType: "task",
+      entityId: id,
+      action: "task.created",
     });
+    const scheduleRevision = this.bumpScheduleRevision(projectId);
+    return { task: toTask(this.taskRow(projectId, id)!), scheduleRevision };
+
   }
 
   updateTask(
@@ -780,7 +827,16 @@ export class ScheduleService {
     taskId: string,
     input: PatchTaskRequest,
   ): { task: TaskEntity; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
+    return this.dependencies.database.transaction(() => this.updateTaskInTransaction(auth, projectId, taskId, input));
+  }
+
+  private updateTaskInTransaction(
+    auth: AuthenticatedSession,
+    projectId: string,
+    taskId: string,
+    input: PatchTaskRequest,
+  ): { task: TaskEntity; scheduleRevision: number } {
+
       this.requireProjectMember(auth, projectId);
       const current = this.requireTask(projectId, taskId);
       this.assertRevision("task", current, input.expectedRevision, toTask);
@@ -846,7 +902,6 @@ export class ScheduleService {
       });
       const scheduleRevision = this.bumpScheduleRevision(projectId);
       return { task: toTask(this.taskRow(projectId, taskId)!), scheduleRevision };
-    });
   }
 
   deleteTask(auth: AuthenticatedSession, projectId: string, taskId: string, expectedRevision: number): { deleted: true; scheduleRevision: number } {
@@ -910,52 +965,62 @@ export class ScheduleService {
     taskId: string,
     input: CreateParticipantRequest,
   ): { participant: ParticipantEntity; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
-      this.requireProjectMember(auth, projectId);
-      const task = this.requireTask(projectId, taskId);
-      this.assertTaskEditable(task);
-      this.requireActiveProjectMember(projectId, input.userId);
-      const duplicate = this.dependencies.database.get<{
-        id: string;
-        revision: number;
-        removed_at: string | null;
-      }>(
-        "SELECT id, revision, removed_at FROM task_participants WHERE task_id = ? AND user_id = ?",
-        [taskId, input.userId],
+    return this.dependencies.database.transaction(() =>
+      this.addParticipantInTransaction(auth, projectId, taskId, input),
+    );
+  }
+
+  private addParticipantInTransaction(
+    auth: AuthenticatedSession,
+    projectId: string,
+    taskId: string,
+    input: CreateParticipantRequest,
+  ): { participant: ParticipantEntity; scheduleRevision: number } {
+    this.requireProjectMember(auth, projectId);
+    const task = this.requireTask(projectId, taskId);
+    this.assertTaskEditable(task);
+    this.requireActiveProjectMember(projectId, input.userId);
+    const duplicate = this.dependencies.database.get<{
+      id: string;
+      revision: number;
+      removed_at: string | null;
+    }>(
+      "SELECT id, revision, removed_at FROM task_participants WHERE task_id = ? AND user_id = ?",
+      [taskId, input.userId],
+    );
+    const now = this.dependencies.clock().toISOString();
+    if (duplicate?.removed_at === null) {
+      throw new HttpError(409, "PARTICIPANT_EXISTS", "The member already has a task assignment.");
+    }
+    const id = duplicate?.id ?? this.dependencies.idGenerator();
+    if (duplicate !== undefined) {
+      if (input.expectedRevision !== duplicate.revision) {
+        this.throwLatestParticipant(projectId, duplicate.id);
+      }
+      const changed = this.dependencies.database.run(
+        `UPDATE task_participants
+            SET start_date=?, end_date=?, estimated_minutes=?, progress_percent=0,
+                status='not_started', removed_at=NULL, removed_by=NULL,
+                updated_by=?, updated_at=?, revision=revision+1
+          WHERE id=? AND project_id=? AND revision=? AND removed_at IS NOT NULL`,
+        [input.startDate, input.endDate, input.estimatedMinutes, auth.user.id, now,
+          id, projectId, input.expectedRevision],
       );
-      const now = this.dependencies.clock().toISOString();
-      if (duplicate?.removed_at === null) {
-        throw new HttpError(409, "PARTICIPANT_EXISTS", "The member already has a task assignment.");
-      }
-      const id = duplicate?.id ?? this.dependencies.idGenerator();
-      if (duplicate !== undefined) {
-        if (input.expectedRevision !== duplicate.revision) {
-          this.throwLatestParticipant(projectId, duplicate.id);
-        }
-        const changed = this.dependencies.database.run(
-          `UPDATE task_participants
-              SET start_date=?, end_date=?, estimated_minutes=?, progress_percent=0,
-                  status='not_started', removed_at=NULL, removed_by=NULL,
-                  updated_by=?, updated_at=?, revision=revision+1
-            WHERE id=? AND project_id=? AND revision=? AND removed_at IS NOT NULL`,
-          [input.startDate, input.endDate, input.estimatedMinutes, auth.user.id, now,
-            id, projectId, input.expectedRevision],
-        );
-        if (changed.changes !== 1) this.throwLatestParticipant(projectId, id);
-      } else {
-        this.dependencies.database.run(
-          `INSERT INTO task_participants
-            (id, project_id, task_id, user_id, start_date, end_date, estimated_minutes,
-             created_by, updated_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [id, projectId, taskId, input.userId, input.startDate, input.endDate,
-            input.estimatedMinutes, auth.user.id, auth.user.id, now, now],
-        );
-      }
-      this.recomputeTaskAndAncestors(projectId, taskId, auth.user.id, now);
-      writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "participant", entityId: id, action: duplicate === undefined ? "participant.created" : "participant.reactivated" });
-      return { participant: toParticipant(this.requireParticipant(projectId, id)), scheduleRevision: this.bumpScheduleRevision(projectId) };
-    });
+      if (changed.changes !== 1) this.throwLatestParticipant(projectId, id);
+    } else {
+      this.dependencies.database.run(
+        `INSERT INTO task_participants
+          (id, project_id, task_id, user_id, start_date, end_date, estimated_minutes,
+           created_by, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, projectId, taskId, input.userId, input.startDate, input.endDate,
+          input.estimatedMinutes, auth.user.id, auth.user.id, now, now],
+      );
+    }
+    this.recomputeTaskAndAncestors(projectId, taskId, auth.user.id, now);
+    writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "participant", entityId: id, action: duplicate === undefined ? "participant.created" : "participant.reactivated" });
+    return { participant: toParticipant(this.requireParticipant(projectId, id)), scheduleRevision: this.bumpScheduleRevision(projectId) };
+
   }
 
   updateParticipant(
@@ -964,7 +1029,16 @@ export class ScheduleService {
     participantId: string,
     input: PatchParticipantRequest,
   ): { participant: ParticipantEntity; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
+    return this.dependencies.database.transaction(() => this.updateParticipantInTransaction(auth, projectId, participantId, input));
+  }
+
+  private updateParticipantInTransaction(
+    auth: AuthenticatedSession,
+    projectId: string,
+    participantId: string,
+    input: PatchParticipantRequest,
+  ): { participant: ParticipantEntity; scheduleRevision: number } {
+
       this.requireProjectMember(auth, projectId);
       const current = this.requireParticipant(projectId, participantId);
       this.assertRevision("participant", current, input.expectedRevision, toParticipant);
@@ -990,13 +1064,18 @@ export class ScheduleService {
       this.recomputeTaskAndAncestors(projectId, current.task_id, auth.user.id, now);
       writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "participant", entityId: participantId, action: "participant.updated" });
       return { participant: toParticipant(this.requireParticipant(projectId, participantId)), scheduleRevision: this.bumpScheduleRevision(projectId) };
-    });
   }
 
   deleteParticipant(
     auth: AuthenticatedSession, projectId: string, participantId: string, expectedRevision: number,
   ): { deleted: true; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
+    return this.dependencies.database.transaction(() => this.deleteParticipantInTransaction(auth, projectId, participantId, expectedRevision));
+  }
+
+  private deleteParticipantInTransaction(
+    auth: AuthenticatedSession, projectId: string, participantId: string, expectedRevision: number,
+  ): { deleted: true; scheduleRevision: number } {
+
       this.requireProjectMember(auth, projectId);
       const current = this.requireParticipant(projectId, participantId);
       this.assertRevision("participant", current, expectedRevision, toParticipant);
@@ -1012,7 +1091,6 @@ export class ScheduleService {
       this.recomputeTaskAndAncestors(projectId, current.task_id, auth.user.id, now);
       writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "participant", entityId: participantId, action: "participant.deleted" });
       return { deleted: true, scheduleRevision: this.bumpScheduleRevision(projectId) };
-    });
   }
 
   progressUpdates(auth: AuthenticatedSession, projectId: string, participantId: string): ProgressEntity[] {
@@ -1099,38 +1177,161 @@ export class ScheduleService {
   createDependency(
     auth: AuthenticatedSession, projectId: string, successorTaskId: string, input: CreateDependencyRequest,
   ): { dependency: DependencyEntity; scheduleRevision: number } {
-    return this.dependencies.database.transaction(() => {
-      this.requireProjectMember(auth, projectId);
-      const successor = this.requireTask(projectId, successorTaskId);
-      this.assertTaskEditable(successor);
-      const predecessor = this.requireTask(projectId, input.predecessorTaskId);
-      this.assertTaskEditable(predecessor);
-      if (createsDependencyCycle(this.dependencyRows(projectId).map((row) => ({ predecessorId: row.predecessor_task_id, successorId: row.successor_task_id })), predecessor.id, successor.id)) {
-        throw new HttpError(409, "DEPENDENCY_CYCLE", "The dependency would create a cycle.");
+    return this.dependencies.database.transaction(() =>
+      this.createDependencyInTransaction(auth, projectId, successorTaskId, input),
+    );
+  }
+
+  private createDependencyInTransaction(
+    auth: AuthenticatedSession, projectId: string, successorTaskId: string, input: CreateDependencyRequest,
+  ): { dependency: DependencyEntity; scheduleRevision: number } {
+    this.requireProjectMember(auth, projectId);
+    const successor = this.requireTask(projectId, successorTaskId);
+    this.assertTaskEditable(successor);
+    const predecessor = this.requireTask(projectId, input.predecessorTaskId);
+    this.assertTaskEditable(predecessor);
+    if (createsDependencyCycle(this.dependencyRows(projectId).map((row) => ({ predecessorId: row.predecessor_task_id, successorId: row.successor_task_id })), predecessor.id, successor.id)) {
+      throw new HttpError(409, "DEPENDENCY_CYCLE", "The dependency would create a cycle.");
+    }
+    const existing = this.dependencies.database.get<DependencyRow>(
+      `SELECT id, project_id, predecessor_task_id, successor_task_id, created_at, revision, deleted_at
+       FROM task_dependencies WHERE project_id=? AND predecessor_task_id=? AND successor_task_id=?`,
+      [projectId, predecessor.id, successor.id],
+    );
+    const now = this.dependencies.clock().toISOString();
+    let id: string;
+    if (existing !== undefined) {
+      if (existing.deleted_at === null) throw new HttpError(409, "DEPENDENCY_EXISTS", "The dependency already exists.", { latest: toDependency(existing) });
+      if (input.expectedRevision === undefined || input.expectedRevision !== existing.revision) {
+        throw new HttpError(409, "REVISION_CONFLICT", "The deleted dependency must be restored with its current revision.", { latest: toDependency(existing) });
       }
-      const existing = this.dependencies.database.get<DependencyRow>(
-        `SELECT id, project_id, predecessor_task_id, successor_task_id, created_at, revision, deleted_at
-         FROM task_dependencies WHERE project_id=? AND predecessor_task_id=? AND successor_task_id=?`,
-        [projectId, predecessor.id, successor.id],
+      this.dependencies.database.run("UPDATE task_dependencies SET deleted_at=NULL, deleted_by=NULL, created_by=?, created_at=?, revision=revision+1 WHERE id=? AND revision=?", [auth.user.id, now, existing.id, existing.revision]);
+      id = existing.id;
+    } else {
+      id = this.dependencies.idGenerator();
+      this.dependencies.database.run(
+        `INSERT INTO task_dependencies (id, project_id, predecessor_task_id, successor_task_id, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`, [id, projectId, predecessor.id, successor.id, auth.user.id, now],
       );
-      const now = this.dependencies.clock().toISOString();
-      let id: string;
-      if (existing !== undefined) {
-        if (existing.deleted_at === null) throw new HttpError(409, "DEPENDENCY_EXISTS", "The dependency already exists.", { latest: toDependency(existing) });
-        if (input.expectedRevision === undefined || input.expectedRevision !== existing.revision) {
-          throw new HttpError(409, "REVISION_CONFLICT", "The deleted dependency must be restored with its current revision.", { latest: toDependency(existing) });
-        }
-        this.dependencies.database.run("UPDATE task_dependencies SET deleted_at=NULL, deleted_by=NULL, created_by=?, created_at=?, revision=revision+1 WHERE id=? AND revision=?", [auth.user.id, now, existing.id, existing.revision]);
-        id = existing.id;
-      } else {
-        id = this.dependencies.idGenerator();
-        this.dependencies.database.run(
-          `INSERT INTO task_dependencies (id, project_id, predecessor_task_id, successor_task_id, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`, [id, projectId, predecessor.id, successor.id, auth.user.id, now],
+    }
+    writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "dependency", entityId: id, action: "dependency.created" });
+    return { dependency: toDependency(this.requireDependency(projectId, id)), scheduleRevision: this.bumpScheduleRevision(projectId) };
+
+  }
+
+  /**
+   * 会议 → 排期的唯一提交入口：一个短事务内完成“校验 + 可选删旧 + 建任务/分工/依赖”。
+   * 任一候选失效或任一步写入失败，整体回滚；旧排期保留。
+   */
+  commitMeetingTasks(
+    auth: AuthenticatedSession,
+    projectId: string,
+    input: CommitMeetingTasksRequest,
+  ): { taskIds: string[]; scheduleRevision: number } {
+    return this.dependencies.database.transaction(() => {
+      const project = this.dependencies.database.get<{
+        id: string;
+        schedule_revision: number;
+        archived_at: string | null;
+      }>(
+        `SELECT projects.id, projects.schedule_revision, projects.archived_at
+           FROM projects
+           JOIN project_members ON project_members.project_id = projects.id
+          WHERE projects.id = ?
+            AND project_members.user_id = ?
+            AND project_members.removed_at IS NULL
+            AND projects.deleted_at IS NULL`,
+        [projectId, auth.user.id],
+      );
+      if (project === undefined) {
+        throw new HttpError(404, "PROJECT_NOT_FOUND", "The project was not found.");
+      }
+      if (project.archived_at !== null) {
+        throw new HttpError(409, "PROJECT_ARCHIVED", "项目已归档，不能重建排期。");
+      }
+      if (project.schedule_revision !== input.expectedScheduleRevision) {
+        throw new HttpError(
+          409,
+          "REVISION_CONFLICT",
+          "排期已被其他人修改，请重新确认任务清单。",
+          { latest: { scheduleRevision: project.schedule_revision } },
         );
       }
-      writeActivity(this.dependencies, { projectId, actorId: auth.user.id, entityType: "dependency", entityId: id, action: "dependency.created" });
-      return { dependency: toDependency(this.requireDependency(projectId, id)), scheduleRevision: this.bumpScheduleRevision(projectId) };
+
+      const memberIds = new Set(
+        this.dependencies.database
+          .all<{ user_id: string }>(
+            "SELECT user_id FROM project_members WHERE project_id = ? AND removed_at IS NULL",
+            [projectId],
+          )
+          .map((row) => row.user_id),
+      );
+      const clientIds = new Set<string>();
+      for (const task of input.tasks) {
+        if (clientIds.has(task.clientTaskId)) {
+          throw new HttpError(400, "DUPLICATE_CLIENT_TASK_ID", `候选任务 ${task.clientTaskId} 重复。`);
+        }
+        clientIds.add(task.clientTaskId);
+        if (task.ownerUserId !== null && !memberIds.has(task.ownerUserId)) {
+          throw new HttpError(400, "INVALID_OWNER", `负责人 ${task.ownerUserId} 不是当前项目成员。`);
+        }
+        for (const predecessor of task.predecessorClientTaskIds) {
+          if (predecessor === task.clientTaskId || !clientIds.has(predecessor)) {
+            // 前驱可能定义在后面：先记录引用，统一在插入依赖时校验。
+          }
+        }
+      }
+      const allClientIds = new Set(input.tasks.map((task) => task.clientTaskId));
+      for (const task of input.tasks) {
+        for (const predecessor of task.predecessorClientTaskIds) {
+          if (predecessor === task.clientTaskId || !allClientIds.has(predecessor)) {
+            throw new HttpError(400, "INVALID_DEPENDENCY", `任务「${task.title}」的前驱不存在或指向自己。`);
+          }
+        }
+      }
+
+      if (input.replaceSchedule) {
+        this.dependencies.database.run("DELETE FROM tasks WHERE project_id = ?", [projectId]);
+        writeActivity(this.dependencies, {
+          projectId,
+          actorId: auth.user.id,
+          entityType: "project",
+          entityId: projectId,
+          action: "schedule.replaced",
+        });
+      }
+
+      const taskIdByClient = new Map<string, string>();
+      for (const task of input.tasks) {
+        const created = this.createTaskInTransaction(auth, projectId, {
+          title: task.title,
+          description: "",
+          startDate: task.startDate,
+          dueDate: task.dueDate,
+        });
+        taskIdByClient.set(task.clientTaskId, created.task.id);
+        if (task.ownerUserId !== null) {
+          this.addParticipantInTransaction(auth, projectId, created.task.id, {
+            userId: task.ownerUserId,
+            startDate: task.startDate,
+            endDate: task.dueDate,
+            estimatedMinutes: task.estimatedMinutes,
+          });
+        }
+      }
+      for (const task of input.tasks) {
+        const successorId = taskIdByClient.get(task.clientTaskId)!;
+        for (const predecessor of task.predecessorClientTaskIds) {
+          this.createDependencyInTransaction(auth, projectId, successorId, {
+            predecessorTaskId: taskIdByClient.get(predecessor)!,
+          });
+        }
+      }
+
+      return {
+        taskIds: input.tasks.map((task) => taskIdByClient.get(task.clientTaskId)!),
+        scheduleRevision: this.requireProjectMember(auth, projectId).schedule_revision,
+      };
     });
   }
 

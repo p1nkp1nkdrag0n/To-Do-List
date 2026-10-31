@@ -56,6 +56,20 @@ function publicInvite(
 export class RegistrationInviteService {
   constructor(private readonly dependencies: V2RuntimeDependencies) {}
 
+  /** 当前用户发出的邀请码列表（只返回元信息，明文码只在创建时出现一次）。 */
+  list(actorId: string): PublicRegistrationInvite[] {
+    const now = this.dependencies.clock().toISOString();
+    const rows = this.dependencies.database.all<RegistrationInviteRow>(
+      `SELECT id, expires_at, created_at, used_at, revoked_at, revision
+         FROM registration_invites
+        WHERE created_by = ?
+        ORDER BY created_at DESC
+        LIMIT 50`,
+      [actorId],
+    );
+    return rows.map((row) => publicInvite(row, now));
+  }
+
   create(actorId: string): CreatedRegistrationInvite {
     return this.dependencies.database.transaction(() => {
       this.requireActiveTeamMember(actorId);

@@ -13,3 +13,7 @@ register-code.txt
 AUTH_SECRET.txt
 BOOTSTRAP_CODE.txt
 DEPLOYMENT.md
+
+# 打包中间产物
+payload.zip
+.tmp/

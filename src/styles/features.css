@@ -123,6 +123,7 @@
 }
 
 .gantt-table {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -1077,4 +1078,579 @@
 .missing-swatch,
 .overload-swatch {
   border-radius: 3px;
+}
+
+/* 甘特图空状态：还没导入会议纪要时给一句引导 */
+.gantt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.gantt-empty strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.gantt-empty p {
+  max-width: 260px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 可用时间：还没涂格子时的提醒 */
+.availability-warning {
+  margin: 10px 0 0;
+  border-color: rgb(245 158 11 / 35%);
+  background: rgb(245 158 11 / 10%);
+  color: #92400e;
+}
+
+.availability-warning span {
+  line-height: 1.7;
+}
+
+/* 可用时间：已涂时长与上限的对照 */
+.availability-usage {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.availability-usage.over {
+  color: #92400e;
+}
+
+/* 语音转写配置（AI 设置面板底部） */
+.llm-asr {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 14px;
+}
+
+.llm-asr strong {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.llm-asr p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.llm-asr label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.llm-asr input {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.llm-asr-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.llm-asr-actions span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 语音转写：导入 / 自己填写 */
+.llm-asr-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.llm-asr-tabs button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 6px 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.llm-asr-tabs button.on {
+  background: var(--surface-selected);
+  color: var(--accent, #2563eb);
+  font-weight: 600;
+}
+
+.llm-asr textarea {
+  width: 100%;
+  min-height: 64px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface);
+  resize: vertical;
+}
+
+.llm-asr-qr {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.llm-asr-qr {
+  margin-bottom: 10px;
+}
+
+.llm-asr-qr img {
+  width: 120px;
+  height: 120px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 6px;
+}
+
+.llm-asr-qr span {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* 模型列表的滚动条：默认太细，用户以为没有滚动 */
+.llm-scroll {
+  scrollbar-width: thin;
+}
+
+.llm-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.llm-scroll::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 55%);
+  border-radius: 4px;
+}
+
+.llm-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 实时会议记录 */
+.meeting-realtime-body {
+  min-height: 220px;
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+
+.meeting-realtime-empty {
+  height: 196px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.meeting-realtime-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.meeting-realtime-line {
+  margin: 0;
+  color: var(--ink);
+}
+
+.meeting-realtime-partial {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.meeting-realtime-placeholder {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* 实时会议：任务草稿 */
+.meeting-realtime-drafts {
+  margin-top: 12px;
+  border-top: 1px dashed var(--glass-border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meeting-realtime-drafts-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.meeting-realtime-drafts-head strong {
+  color: var(--ink);
+}
+
+.meeting-realtime-draft {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  font-size: 12.5px;
+}
+
+.meeting-realtime-draft-title {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.meeting-realtime-draft-meta {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.meeting-realtime-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.meeting-realtime-meter i {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.meeting-realtime-meter b {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #22c55e;
+  transition: width 120ms linear;
+}
+
+.meeting-realtime-meter .on {
+  color: #15803d;
+}
+
+.meeting-realtime-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.meeting-realtime-device select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+/* 实时会议工作区（页内分栏） */
+.realtime-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 16px 12px;
+}
+
+.realtime-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.realtime-head > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.realtime-timer {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.realtime-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.realtime-dot.on {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgb(239 68 68 / 18%);
+}
+
+.realtime-state {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.realtime-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.realtime-device {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  max-width: 260px;
+}
+
+.realtime-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.realtime-meter i {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.realtime-meter b {
+  display: block;
+  height: 100%;
+  background: #22c55e;
+  transition: width 100ms linear;
+}
+
+.realtime-meter .on {
+  color: #15803d;
+}
+
+.realtime-split {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.realtime-transcript,
+.realtime-drafts {
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.realtime-transcript {
+  flex: 1.15;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.realtime-drafts {
+  width: 38%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.realtime-drafts-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.realtime-drafts-head strong {
+  color: var(--ink);
+}
+
+.realtime-draft {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  background: var(--surface-soft);
+}
+
+.realtime-draft span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.realtime-line {
+  margin: 0;
+}
+
+.realtime-partial {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.realtime-placeholder {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.realtime-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.realtime-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.realtime-draft-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #fef3c7;
+  color: #b45309;
+  font-style: normal;
+  font-size: 10.5px;
+}
+
+/* 实时会议：确认任务清单 */
+.realtime-review {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.realtime-review-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.realtime-review-head span {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.realtime-review-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.realtime-review-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.realtime-review-title {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.realtime-review-row select {
+  width: 110px;
+  flex: none;
+}
+
+.realtime-review-row input[type="number"] {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.realtime-review-row input[type="number"] {
+  width: 84px;
+}
+
+.realtime-review-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }

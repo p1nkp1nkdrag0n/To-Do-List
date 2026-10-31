@@ -41,6 +41,8 @@ function automaticSection(
   activeView: WorkspaceView,
 ): TourSection {
   if (!hasProject) return "project-setup";
+  // 会议页是后加的工作区，引导沿用 workspace 那一套，不单独开一段。
+  if (activeView === "meeting") return "workspace";
   return activeView === "gantt" ? "workspace" : activeView;
 }
 
@@ -101,6 +103,15 @@ export function useProductTour({
   const start = useCallback((section: TourSection, manual = false) => {
     setActive({ section, stepIndex: 0, manual });
   }, []);
+
+  // 被邀请的成员本来没有项目，引导可能先停在「创建项目」；
+  // 加入项目后要结束这一段，否则工作区引导永远不开始。
+  useEffect(() => {
+    if (hasProject && active?.section === "project-setup") {
+      persistCompletion("project-setup");
+      setActive(undefined);
+    }
+  }, [active?.section, hasProject, persistCompletion]);
 
   useEffect(() => {
     if (
