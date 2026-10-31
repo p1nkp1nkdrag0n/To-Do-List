@@ -1670,3 +1670,28 @@
 .realtime-review-dependency .link-button {
   margin-left: 8px;
 }
+
+/* 字幕行可直接点击编辑；无边框时看起来仍像普通文本。 */
+textarea.realtime-line {
+  width: 100%;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.7;
+  resize: none;
+  overflow: hidden;
+}
+
+textarea.realtime-line:hover {
+  border-color: var(--glass-border);
+  background: var(--surface-soft);
+}
+
+textarea.realtime-line:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}

@@ -375,9 +375,14 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
             </p>
           ) : null}
           {lines.map((line, index) => (
-            <p key={`${index}-${line.slice(0, 10)}`} className="realtime-line">
-              {line}
-            </p>
+            <textarea
+              key={index}
+              className="realtime-line"
+              value={line}
+              rows={Math.max(1, Math.ceil(line.length / 36))}
+              aria-label={`第 ${index + 1} 句字幕`}
+              onChange={(event) => replaceLine(index, event.target.value)}
+            />
           ))}
           {partial !== "" ? <p className="realtime-partial">{partial}</p> : null}
         </div>
