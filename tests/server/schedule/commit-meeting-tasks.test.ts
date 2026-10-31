@@ -253,7 +253,17 @@ describe("commitMeetingTasks", () => {
 
   it("合法输入写到第二条时数据库异常：任务、分工、依赖、活动、版本全部回滚", () => {
     const fixture = buildFixture();
-    commit(fixture, [candidate(fixture, { title: "旧任务" })]);
+    const oldFirst = candidate(fixture, { title: "旧任务 A" });
+    const oldSecond = candidate(fixture, {
+      title: "旧任务 B",
+      predecessorClientTaskIds: [oldFirst.clientTaskId],
+    });
+    commit(fixture, [oldFirst, oldSecond]);
+    expect(
+      fixture.database.all("SELECT id FROM task_dependencies WHERE project_id = ?", [
+        fixture.projectId,
+      ]),
+    ).toHaveLength(1);
     const beforeTasks = fixture.database.all(
       "SELECT id, title FROM tasks WHERE project_id = ? ORDER BY id",
       [fixture.projectId],
