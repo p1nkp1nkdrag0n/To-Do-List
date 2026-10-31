@@ -569,10 +569,12 @@ export class MeetingOrchestrator {
           throw new Error("负责人已不是当前项目成员，整批未提交。");
         }
 
-        const dependencyTitles =
-          task.dependsOnTitles ??
-          (task.dependsOnTitle ? [task.dependsOnTitle] : []);
         const predecessorClientTaskIds = [...(task.predecessorClientTaskIds ?? [])];
+        // 显式稳定 ID 优先：即使标题重复，也不再用标题去猜。
+        const dependencyTitles =
+          predecessorClientTaskIds.length > 0
+            ? []
+            : (task.dependsOnTitles ?? (task.dependsOnTitle ? [task.dependsOnTitle] : []));
         for (const dependencyTitle of dependencyTitles) {
           const exact = idsByTitle.get(dependencyTitle) ?? [];
           if (exact.length > 1) {
