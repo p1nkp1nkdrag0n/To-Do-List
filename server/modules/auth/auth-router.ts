@@ -1,5 +1,3 @@
-import os from "node:os";
-
 import { Router, type NextFunction, type Request, type Response } from "express";
 
 import {
@@ -17,17 +15,11 @@ import {
   sessionDurationSeconds,
 } from "./auth-service.js";
 
-/** 首次初始化只允许本机：避免局域网里有人抢先创建管理员。 */
+/** Use the transport peer, never a client-controlled forwarded header. */
 function isLocalRequest(request: Request): boolean {
-  const raw = request.ip ?? request.socket.remoteAddress ?? "";
-  const ip = raw.replace(/^::ffff:/, "");
-  if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true;
-  for (const addresses of Object.values(os.networkInterfaces())) {
-    for (const address of addresses ?? []) {
-      if (address.address === ip) return true;
-    }
-  }
-  return false;
+  const ip = (request.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
+  const clientIp = (request.ip ?? ip).replace(/^::ffff:/, "");
+  return (ip === "127.0.0.1" || ip === "::1") && (clientIp === "127.0.0.1" || clientIp === "::1");
 }
 
 export interface AuthLocals {
@@ -62,7 +54,7 @@ export function createAuthRouter(
 
   /** 首启向导：只有空库时才需要/允许。 */
   router.get("/bootstrap-status", (_request, response) => {
-    response.json({ needsBootstrap: service.needsBootstrap() });
+    response.json({ needsBootstrap: service.needsBootstrap(), requiresBootstrapCode: dependencies.bootstrapCode !== "" });
   });
 
   router.post(
@@ -77,7 +69,7 @@ export function createAuthRouter(
       }
       const result = await service.bootstrapAdmin(
         parseRequestBody(BootstrapAdminRequestSchema, request),
-        request.ip ?? request.socket.remoteAddress ?? "unknown",
+        request.socket.remoteAddress ?? "unknown",
       );
       response.cookie("team_session", result.token, {
         ...cookieOptions,
@@ -90,7 +82,7 @@ export function createAuthRouter(
   router.post(
     "/register",
     asyncRoute(async (request, response) => {
-      const result = await service.register(parseRequestBody(RegisterRequestSchema, request));
+      const result = await service.register(parseRequestBody(RegisterRequestSchema, request), request.socket.remoteAddress ?? "unknown");
       response.status(201).json(result);
     }),
   );

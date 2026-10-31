@@ -75,6 +75,7 @@ fs.copyFileSync(nodeExe, path.join(release, "node.exe"));
 console.log("写入启动器…");
 fs.mkdirSync(path.join(release, "launcher"), { recursive: true });
 copy(path.join(root, "packaging", "launcher", "launch.mjs"), path.join(release, "launcher", "launch.mjs"));
+copy(path.join(root, "packaging", "launcher", "data-root.mjs"), path.join(release, "launcher", "data-root.mjs"));
 fs.writeFileSync(
   path.join(release, "启动.cmd"),
   [

@@ -83,12 +83,20 @@ function chineseNumber(value: string): number | null {
   return CHINESE_DIGITS[value] ?? null;
 }
 
-function hoursFrom(text: string): number | null {
-  const match = text.match(/(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H)/);
-  if (match === null) return null;
-  const value = chineseNumber(match[1]!);
+// A duration unit must end the estimate or be followed by a separator. This
+// excludes task nouns such as “24小时制显示” / “24小时监控” and identifiers “H5”.
+// Use the same grammar for extraction and title cleanup, so they cannot disagree.
+const DURATION_SOURCE = String.raw`(?<![\d.\-−负一二两三四五六七八九十])(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H)(?=$|[\s,，。；;！!？?、或和/])`;
+
+function durationFrom(text: string): { hours: number; index: number } | null {
+  const matches = [...text.matchAll(new RegExp(DURATION_SOURCE, "gu"))];
+  // Multiple estimates need clarification instead of silently picking one.
+  if (matches.length !== 1) return null;
+  const match = matches[0]!;
+  const raw = match[1]!;
+  const value = /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : chineseNumber(raw);
   if (value === null || !Number.isFinite(value) || value <= 0 || value > 200) return null;
-  return value;
+  return { hours: value, index: match.index };
 }
 
 /** 规则兜底：认「某人 + 做某事 + N 小时」。宁可少抽，也不乱抽。 */
@@ -105,8 +113,9 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
       (name) => line.startsWith(`${name}：`) || line.startsWith(`${name}:`) || line.startsWith(name),
     );
     const owner = speaker ?? memberNames.find((name) => line.includes(name));
-    const hours = hoursFrom(line);
-    if (hours === null) continue;
+    const duration = durationFrom(line);
+    if (duration === null) continue;
+    const hours = duration.hours;
 
     // 标题里不能带名字，三种写法都要能认：
     //   甲：订营地，2 小时
@@ -131,9 +140,10 @@ export function extractWithRules(text: string, memberNames: string[]): Extracted
       .trim();
     title = title.split(/[，,。；;]/)[0]!.trim();
     title = title.replace(/(我来接|我来做|我来写|我来调|我来|负责).*$/, "").trim();
-    title = title
-      .replace(/(需要|要)?\s*(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(?:个)?\s*(?:钟头|小时|h|H).*$/u, "")
-      .trim();
+    const titleDuration = durationFrom(title);
+    if (titleDuration !== null) {
+      title = title.slice(0, titleDuration.index).replace(/(?:需要|要)\s*$/u, "").trim();
+    }
     if (title.length < 2) continue;
     if (title.length > 30) title = `${title.slice(0, 30)}…`;
 

@@ -2,7 +2,7 @@
  * 便携版启动器：选端口 → 准备数据目录 → （首次）请求管理员加防火墙 → 起服务 → 开浏览器。
  *
  * 数据目录：%LOCALAPPDATA%\ToDoList\data      （绝不放程序目录）
- * 配置：    %APPDATA%\ToDoList\config.json    （端口、密钥、防火墙是否已放行）
+ * 配置：    %LOCALAPPDATA%\ToDoList\config.json    （端口、密钥、防火墙是否已放行）
  */
 import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -11,59 +11,31 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { pickDataRoot, migrateDataRoot, readLauncherConfig, writeLauncherConfig, findLegacyDataRoots } from "./data-root.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, "..", "app");
 const serverEntry = path.join(appRoot, "dist-server", "server", "v2.js");
 const mcpEntry = path.join(appRoot, "dist-server", "server", "mcp", "main.js");
 
-/**
- * 选一个真正可写的数据根目录。
- * 有些机器（或受限账户）不允许往 %LOCALAPPDATA% 写，这时依次退到：
- *   程序目录\ToDoList-data  →  系统临时目录\ToDoList
- */
-function canWrite(dir) {
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    const probe = path.join(dir, ".write-test");
-    fs.writeFileSync(probe, "ok");
-    fs.unlinkSync(probe);
-    return true;
-  } catch {
-    return false;
-  }
+const programRoot = path.resolve(here, "..");
+const dataRoot = pickDataRoot({ programRoot });
+// Do not silently open an empty database when a previous unsafe fallback exists.
+if (!process.env.TODOLIST_MIGRATE_FROM) {
+  const legacyRoots = findLegacyDataRoots({ destination: dataRoot, programRoot });
+  if (legacyRoots.length > 0) throw new Error(`发现旧数据：${legacyRoots.join("；")}。请关闭旧程序，选择需要迁移的旧数据根目录设置 TODOLIST_MIGRATE_FROM 及 TODOLIST_MIGRATION_OFFLINE=1 后重启；不会覆盖或删除原数据。`);
 }
 
-function pickDataRoot() {
-  const candidates = [
-    path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "ToDoList"),
-    path.join(appRoot, "..", "ToDoList-data"),
-    path.join(os.tmpdir(), "ToDoList"),
-  ];
-  for (const candidate of candidates) {
-    if (canWrite(candidate)) return candidate;
+if (process.env.TODOLIST_MIGRATE_FROM) {
+  if (process.env.TODOLIST_MIGRATION_OFFLINE !== "1") {
+    throw new Error("迁移前请关闭旧程序，并明确设置 TODOLIST_MIGRATION_OFFLINE=1。旧数据不会被删除。");
   }
-  throw new Error(
-    "找不到可写的目录。请把程序放到「文档」或「桌面」下再试，或用管理员身份运行。",
-  );
+  migrateDataRoot(process.env.TODOLIST_MIGRATE_FROM, dataRoot);
 }
-
-const dataRoot = pickDataRoot();
 const configPath = path.join(dataRoot, "config.json");
 const dataDir = path.join(dataRoot, "data");
-
-function readConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(configPath, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function writeConfig(config) {
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
-}
+const readConfig = () => readLauncherConfig(configPath);
+const writeConfig = (config) => writeLauncherConfig(configPath, config);
 
 function isPortFree(port) {
   return new Promise((resolve) => {
@@ -136,6 +108,7 @@ async function main() {
   const config = readConfig();
   const sessionSecret =
     config.sessionSecret ?? crypto.randomBytes(32).toString("hex");
+  const bootstrapCode = crypto.randomBytes(16).toString("hex");
   const port = await pickPort(config.port ?? 4000);
   writeConfig({ ...config, sessionSecret, port, dataPath: dataDir });
 
@@ -154,9 +127,10 @@ async function main() {
       HOST: "0.0.0.0",
       DB_PATH: path.join(dataDir, "app.sqlite"),
       UPLOAD_PATH: path.join(dataDir, "uploads"),
+      BACKUP_PATH: path.join(dataDir, "backups"),
       SESSION_SECRET: sessionSecret,
       COOKIE_SECURE: "false",
-      BOOTSTRAP_CODE: crypto.randomBytes(16).toString("hex"),
+      BOOTSTRAP_CODE: bootstrapCode,
       MCP_ENTRY: mcpEntry,
     },
   });
@@ -204,6 +178,7 @@ async function main() {
     console.log("  没有检测到局域网地址（可能没连 WiFi）。");
   }
   console.log("  首次使用：在自己浏览器里完成初始化（创建管理员）");
+  console.log(`  初始化码（仅首启使用，请勿分享）：${bootstrapCode}`);
   console.log("  关闭本窗口 = 停止服务");
   console.log("============================================\n");
 

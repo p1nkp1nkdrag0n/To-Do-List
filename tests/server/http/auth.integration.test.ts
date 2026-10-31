@@ -393,7 +393,8 @@ describe("v2 authentication HTTP API", () => {
 
     expect(passwordHasher).toHaveBeenCalledTimes(1);
     expect(responses.filter(({ status }) => status === 201)).toHaveLength(1);
-    expect(responses.filter(({ status }) => status === 403)).toHaveLength(49);
+    expect(responses.filter(({ status }) => status === 403 || status === 429)).toHaveLength(49);
+    expect(responses.filter(({ status }) => status === 429).every(({ body }) => body.error.code === "BOOTSTRAP_RATE_LIMITED")).toBe(true);
     expect(
       responses
         .filter(({ status }) => status === 403)
@@ -980,18 +981,19 @@ describe("first-run bootstrap wizard", () => {
 
     const before = await request(application).get("/api/auth/bootstrap-status");
     expect(before.status).toBe(200);
-    expect(before.body).toEqual({ needsBootstrap: true });
+    expect(before.body).toEqual({ needsBootstrap: true, requiresBootstrapCode: true });
 
     const created = await request(application).post("/api/auth/bootstrap").send({
       username: "alice",
       displayName: "管理员",
       password: "StrongPass123",
+      bootstrapCode: BOOTSTRAP_CODE,
     });
     expect(created.status).toBe(201);
     expect(created.headers["set-cookie"]?.[0]).toContain("team_session=");
 
     const after = await request(application).get("/api/auth/bootstrap-status");
-    expect(after.body).toEqual({ needsBootstrap: false });
+    expect(after.body).toEqual({ needsBootstrap: false, requiresBootstrapCode: true });
   });
 
   it("refuses a second bootstrap and keeps the first admin able to log in", async () => {
@@ -1000,12 +1002,14 @@ describe("first-run bootstrap wizard", () => {
       username: "alice",
       displayName: "管理员",
       password: "StrongPass123",
+      bootstrapCode: BOOTSTRAP_CODE,
     });
 
     const second = await request(application).post("/api/auth/bootstrap").send({
       username: "attacker",
       displayName: "攻击者",
       password: "StrongPass123",
+      bootstrapCode: BOOTSTRAP_CODE,
     });
     expect(second.status).toBe(409);
     expect(second.body.error.code).toBe("BOOTSTRAP_CLOSED");

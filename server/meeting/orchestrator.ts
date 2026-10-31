@@ -576,21 +576,9 @@ export class MeetingOrchestrator {
           if (exact.length === 1) {
             predecessorClientTaskIds = exact;
           } else {
-            const fuzzy = batchTasks
-              .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
-              .filter(({ candidate }) => candidate.title !== task.title)
-              .filter(
-                ({ candidate }) =>
-                  candidate.title.includes(task.dependsOnTitle!) ||
-                  task.dependsOnTitle!.includes(candidate.title),
-              );
-            if (fuzzy.length !== 1) {
-              throw new Error(`依赖标题「${task.dependsOnTitle}」无法唯一匹配到前驱任务。`);
-            }
-            predecessorClientTaskIds = [
-              batchTasks[fuzzy[0]!.candidateIndex]!.clientTaskId ??
-                `task-${fuzzy[0]!.candidateIndex}`,
-            ];
+            // Even a unique substring match can select the wrong task. Never persist
+            // guessed dependencies: the reviewer must supply the exact title or ID.
+            throw new Error(`依赖标题「${task.dependsOnTitle}」没有精确匹配，整批未提交。请在纪要中使用前驱任务的完整标题后重试。`);
           }
         }
         if (predecessorClientTaskIds.includes(clientTaskId)) {

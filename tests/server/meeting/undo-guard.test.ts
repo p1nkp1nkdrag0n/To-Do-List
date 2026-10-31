@@ -283,6 +283,7 @@ describe("撤销写后版本保护", () => {
           taskId: f.task.id,
           newEndDate: "2026-07-28",
           previousEndDate: "2026-07-25",
+          previousTaskDueDate: f.task.dueDate,
         },
       ],
       createdParticipants: [

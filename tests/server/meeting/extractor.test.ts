@@ -78,4 +78,33 @@ describe("会议纪要规则解析", () => {
     expect(tasks[0]!.title).toBe("整理演示稿");
   });
 
+  it.each([
+    ["甲负责实现24小时制显示，2小时", "实现24小时制显示"],
+    ["甲负责实现24小时制显示需要2小时", "实现24小时制显示"],
+    ["甲负责建设24小时监控需要2小时", "建设24小时监控"],
+    ["甲负责实现H5页面需要2h", "实现H5页面"],
+  ])("保留标题内非工时数字：%s", (text, title) => {
+    expect(extractWithRules(text, ["甲"])).toMatchObject([{ title, ownerName: "甲", estimatedHours: 2 }]);
+  });
+
+  it("24小时制不是工时，不能单独据此抽取任务", () => {
+    expect(extractWithRules("甲负责实现24小时制显示", ["甲"])).toEqual([]);
+  });
+
+  it("未知负责人仍保留未分配与完整数字标题", () => {
+    expect(extractWithRules("玖魇桁负责实现24小时制显示需要2小时", MEMBERS))
+      .toMatchObject([{ title: "实现24小时制显示", ownerName: "未分配", estimatedHours: 2 }]);
+  });
+
+  it("支持明确的小数工时而不丢弃任务", () => {
+    expect(extractWithRules("甲负责实现24小时制显示需要1.5小时", ["甲"]))
+      .toMatchObject([{ title: "实现24小时制显示", estimatedHours: 1.5 }]);
+  });
+
+  it.each(["-2小时", "0小时", "201小时", "2小时后交付", "24h格式", "2小时，4小时", "2小时或4小时"])(
+    "不将无效或不明确的时长当工时：%s", estimate => {
+      expect(extractWithRules(`甲负责实现界面，${estimate}`, ["甲"])).toEqual([]);
+    },
+  );
+
 });

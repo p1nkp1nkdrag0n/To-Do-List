@@ -37,9 +37,8 @@ export function loadSchedule(
   const timezone = project?.timezone ?? "Asia/Shanghai";
   const today = todayInTimeZone(now, timezone);
 
-  const tasks = runtime.schedule.listTasks(runtime.auth, projectId);
-  const participants = runtime.schedule.listParticipants(runtime.auth, projectId);
-  const dependencies = runtime.schedule.listDependencies(runtime.auth, projectId);
+  const schedule = runtime.schedule.schedule(runtime.auth, projectId);
+  const { tasks, participants, dependencies } = schedule;
   const summary = runtime.availability.projectSummary(runtime.auth, projectId);
 
   const profiles = summary.members.flatMap((member) =>
@@ -56,6 +55,7 @@ export function loadSchedule(
 
   return {
     snapshot: {
+      scheduleRevision: schedule.revision,
       tasks: tasks.map((task) => ({
         id: task.id,
         startDate: task.startDate,
@@ -79,6 +79,7 @@ export function loadSchedule(
     },
     context: {
       today,
+      timezone,
       memberIds: summary.members.map((member) => member.userId),
       memberNames: new Map(summary.members.map((member) => [member.userId, member.displayName])),
       taskTitles: new Map(tasks.map((task) => [task.id, task.title])),
