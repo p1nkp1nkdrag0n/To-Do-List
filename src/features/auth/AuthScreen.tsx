@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   Eye,
@@ -10,9 +10,10 @@ import {
 } from "lucide-react";
 
 import { BrandMark } from "../../components/BrandMark";
-import { api, errorMessage } from "../../lib/api";
+import { api, ApiError, errorMessage } from "../../lib/api";
 import type { AuthState } from "../../types";
 import { AsciiFlowCanvas } from "./AsciiFlowCanvas";
+import { FirstRunGuide } from "./FirstRunGuide";
 
 interface AuthScreenProps {
   onAuthenticated: (auth: AuthState) => void;
@@ -28,12 +29,78 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** null = 还不知道；true = 空库，走首启向导。 */
+  const [needsBootstrap, setNeedsBootstrap] = useState<boolean | null>(null);
+  const [requiresBootstrapCode, setRequiresBootstrapCode] = useState(true);
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<{ needsBootstrap: boolean; requiresBootstrapCode: boolean }>("/api/auth/bootstrap-status")
+      .then((result) => {
+        if (!cancelled) {
+          setNeedsBootstrap(result.needsBootstrap);
+          setRequiresBootstrapCode(result.requiresBootstrapCode);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNeedsBootstrap(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** 把后端返回的字段错误翻成一句中文（用户名最常见）。 */
+  const readableError = (caught: unknown): string => {
+    if (caught instanceof ApiError && caught.fieldErrors !== undefined) {
+      const field = caught.fieldErrors;
+      if (field.username !== undefined) {
+        const raw = field.username[0] ?? "";
+        if (/Too small/i.test(raw)) return "用户名至少 3 个字符。";
+        if (/Too big/i.test(raw)) return "用户名最多 32 个字符。";
+        return "用户名只能用字母、数字、下划线、点或短横线（3–32 位），不能用中文。";
+      }
+      if (field.password !== undefined) {
+        return "密码至少 8 位，且不能超过 72 个字节。";
+      }
+      if (field.displayName !== undefined) {
+        return "显示名称不能为空，最多 80 个字。";
+      }
+      const first = Object.values(field)[0]?.[0];
+      if (first !== undefined) return first;
+    }
+    return errorMessage(caught);
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError("");
     try {
+      if (needsBootstrap === true) {
+        if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username)) {
+          setError("用户名只能用字母、数字、下划线、点或短横线（3–32 位），不能用中文。");
+          return;
+        }
+        if (password.length < 8) {
+          setError("密码至少 8 位。");
+          return;
+        }
+        if (password !== confirmPassword) {
+          setError("两次输入的密码不一致");
+          return;
+        }
+        const auth = await api.post<AuthState>("/api/auth/bootstrap", {
+          username,
+          displayName,
+          password,
+          ...(registrationCode ? { bootstrapCode: registrationCode } : {}),
+        });
+        onAuthenticated(auth);
+        return;
+      }
       if (mode === "register") {
         await api.post("/api/auth/register", {
           username,
@@ -49,7 +116,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       const auth = await api.post<AuthState>("/api/auth/login", { username, password });
       onAuthenticated(auth);
     } catch (caught) {
-      setError(errorMessage(caught));
+      setError(readableError(caught));
     } finally {
       setBusy(false);
     }
@@ -58,30 +125,38 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   return (
     <main className="auth-page">
       <AsciiFlowCanvas />
+      <FirstRunGuide />
       <section className="auth-panel">
         <BrandMark auth />
-        <div className="auth-tabs" role="tablist">
-          <button
-            aria-selected={mode === "login"}
-            className={mode === "login" ? "active" : ""}
-            role="tab"
-            type="button"
-            onClick={() => setMode("login")}
-          >
-            登录
-          </button>
-          <button
-            aria-selected={mode === "register"}
-            className={mode === "register" ? "active" : ""}
-            role="tab"
-            type="button"
-            onClick={() => setMode("register")}
-          >
-            注册账号
-          </button>
-        </div>
+        {needsBootstrap === true ? (
+          <div className="auth-wizard">
+            <strong>欢迎使用</strong>
+            <span>这台设备还没有账号，先创建一个管理员</span>
+          </div>
+        ) : (
+          <div className="auth-tabs" role="tablist">
+            <button
+              aria-selected={mode === "login"}
+              className={mode === "login" ? "active" : ""}
+              role="tab"
+              type="button"
+              onClick={() => setMode("login")}
+            >
+              登录
+            </button>
+            <button
+              aria-selected={mode === "register"}
+              className={mode === "register" ? "active" : ""}
+              role="tab"
+              type="button"
+              onClick={() => setMode("register")}
+            >
+              注册账号
+            </button>
+          </div>
+        )}
         <form aria-label={mode === "login" ? "登录" : "注册账号"} onSubmit={submit}>
-          {mode === "register" ? (
+          {mode === "register" || needsBootstrap === true ? (
             <label className="auth-field">
               <span>显示名称</span>
               <span className="auth-input-shell">
@@ -122,7 +197,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
-                minLength={mode === "register" ? 8 : 1}
+                minLength={mode === "register" || needsBootstrap === true ? 8 : 1}
                 autoComplete={mode === "register" ? "new-password" : "current-password"}
                 placeholder="请输入密码"
               />
@@ -137,7 +212,34 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               </button>
             </span>
           </div>
-          {mode === "register" ? (
+          {needsBootstrap === true ? (
+            <label className="auth-field">
+              <span>确认密码</span>
+              <span className="auth-input-shell">
+                <LockKeyhole size={18} aria-hidden="true" />
+                <input
+                  type={passwordVisible ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  placeholder="再输入一次密码"
+                />
+              </span>
+            </label>
+          ) : null}
+          {needsBootstrap === true && requiresBootstrapCode ? (
+            <label className="auth-field">
+              <span>初始化码（启动窗口或管理员提供）</span>
+              <span className="auth-input-shell">
+                <TicketCheck size={18} aria-hidden="true" />
+                <input value={registrationCode} onChange={(event) => setRegistrationCode(event.target.value)}
+                  required autoComplete="one-time-code" type="password" />
+              </span>
+            </label>
+          ) : null}
+          {mode === "register" && needsBootstrap !== true ? (
             <>
               <label className="auth-field">
                 <span>注册邀请码或初始化码</span>
@@ -161,6 +263,11 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           <button className="primary-button auth-submit" type="submit" disabled={busy}>
             {busy ? (
               "正在处理…"
+            ) : needsBootstrap === true ? (
+              <>
+                创建并开始
+                <ArrowRight size={17} />
+              </>
             ) : mode === "login" ? (
               <>
                 <KeyRound size={17} />

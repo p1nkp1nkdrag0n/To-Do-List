@@ -15,6 +15,10 @@ export function createRegistrationInviteRouter(
   const router = Router();
   const service = new RegistrationInviteService(dependencies);
 
+  router.get("/", (_request, response: Response<unknown, AuthLocals>) => {
+    response.json({ invites: service.list(response.locals.auth.user.id) });
+  });
+
   router.post("/", (request, response: Response<unknown, AuthLocals>) => {
     parseRequestBody(CreateRegistrationInviteRequestSchema, request);
     response.status(201).json({

@@ -22,9 +22,52 @@
 哈希、完整许可、浏览器依赖声明以及字体原始字节。依赖更新后另运行 `npm run licenses:update`
 并审阅声明差异。操作系统、Node.js、反向代理及自行加入的组件需要独立保留它们的许可。
 
+## 项目来源与修改说明
+
+本项目基于 [p1nkp1nkdrag0n/To-Do-List](https://github.com/p1nkp1nkdrag0n/To-Do-List)
+（AGPL-3.0-only）二次开发，原项目的版权与许可声明一并保留。本仓库是该项目的衍生版本，
+依据 AGPL-3.0 第 5 条标注修改。
+
+比赛与课题期间的主要改动：
+
+- **会议纪要 → 排期**：上传纪要或粘贴文本，抽取任务、建立排期、检测容量/依赖冲突并给出修复方案，
+  处理完自动跳转甘特图；支持在 AI 设置里为每个账号单独配置模型 Key。
+- **MCP 工具层**：把排期能力封装为 MCP server（`server/mcp/`），编排器通过 stdio 调用，
+  保证所有写操作走同一入口。
+- **首次使用体验**：首启向导（空库创建管理员）、使用说明（侧栏八章帮助）、
+  纪要人名与成员显示名称的一致校验提示、可用时间为 0 时的引导。
+- **桌面分发**：便携目录与单文件 exe 打包脚本（`packaging/`），
+  首次运行自解压、数据与程序分离、解压完整性校验。
+
+这些改动的提交记录见 `git log`；上游仓库的合并请求与依赖审计过程记录在
+`docs/delivery.md` 与 `docs/dependency-audit.md`。
+
 面向 3-8 人大学生创新团队和研究生课题组的局域网项目管理系统。默认工作区是甘特图，核心目标是把比赛、科研任务、成员投入、截止节点和版本化资料放在同一条可协作的时间线上。
 
 v2 是一次性重建版本，不读取或迁移 v1 业务数据。上线前请离线保留旧构建和旧数据库。
+
+## 成果索引
+
+- 技术报告：[Word](docs/会议排期系统技术报告.docx) · [PDF](docs/会议排期系统技术报告.pdf)
+- 验证记录：[验证清单](docs/验证清单.md)
+- 发布说明：[release-notes.md](release-notes.md)
+- 关键截图：[实时工作区](docs/images/realtime-workspace.png) · [确认清单](docs/images/task-confirmation.png) · [资料库](docs/images/resource-library.png)
+- 可执行文件：GitHub Releases 中的 `ToDoList-f960-交付版.exe`（125 MB，不进入 Git 历史）
+
+## 会议 → 排期（本次新增）
+
+把一段会议纪要（或 txt / docx / pdf 文件）变成真实排期，并自动修复冲突：
+
+```
+纪要 → 抽取任务（大模型）→ 建库/分工/依赖 → 冲突检测 → 自动重排 → 甘特图
+```
+
+- 入口：左侧「会议」→ 粘贴纪要或上传文件
+- 支持撤销上一次自动调整；可锁定负责人（只延期、不换人）
+- 大模型 Key 按用户隔离，在「手动 → AI 设置」里配置（DeepSeek / 硅基流动 / 通义 / 智谱 / Kimi / 自定义）
+- 演示：`npm run demo`，然后「填入示例纪要」
+
+细节与部署状态见 [docs/delivery.md](docs/delivery.md)，依赖审计见 [docs/dependency-audit.md](docs/dependency-audit.md)。
 
 ## 核心能力
 

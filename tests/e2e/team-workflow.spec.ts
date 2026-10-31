@@ -12,6 +12,23 @@ const member = {
   password: "password-123",
 };
 
+/** 首启向导 / 教程弹窗会在登录后自动出现，先关掉再继续。 */
+async function dismissOnboarding(page: Page): Promise<void> {
+  const acknowledge = page.getByRole("button", { name: "我知道了" });
+  if (await acknowledge.isVisible().catch(() => false)) {
+    await acknowledge.click();
+  }
+  const tutorial = page.getByRole("dialog", { name: /演示教程/ });
+  // 教程是登录后异步弹出的：最多等 6 秒，看到就关掉。
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (await tutorial.isVisible().catch(() => false)) {
+      await page.getByRole("button", { name: "跳过教程" }).click();
+      break;
+    }
+    await page.waitForTimeout(300);
+  }
+}
+
 async function register(
   page: Page,
   account: typeof leader,
@@ -20,6 +37,11 @@ async function register(
 ): Promise<void> {
   await page.goto("/");
   await expect(page.locator(".ascii-flow-canvas")).toBeVisible();
+  // 登录页也会弹出「开始之前，请先看这 5 条」，先关掉再操作表单。
+  const introAcknowledge = page.getByRole("button", { name: "我知道了" });
+  if (await introAcknowledge.isVisible().catch(() => false)) {
+    await introAcknowledge.click();
+  }
   const authPanel = page.locator(".auth-panel");
   await expect(authPanel).toBeVisible();
   const viewport = page.viewportSize();
@@ -33,15 +55,24 @@ async function register(
   }, viewport);
   expect(panelPosition.horizontalOffset).toBeLessThan(2);
   expect(panelPosition.verticalOffset).toBeLessThan(2);
-  await page.getByRole("tab", { name: "注册账号" }).click();
-  await page.getByLabel("显示名称").fill(account.displayName);
-  await page.getByLabel("用户名").fill(account.username);
-  await page.getByLabel("密码", { exact: true }).fill(account.password);
-  await page.getByLabel("注册邀请码或初始化码").fill(code);
+
   if (bootstrap) {
-    await page.getByLabel("这是首次部署的初始化码").check();
+    // 桌面版首启向导：不再有「注册账号」标签，直接创建管理员。
+    await page.getByLabel("显示名称").fill(account.displayName);
+    await page.getByLabel("用户名").fill(account.username);
+    await page.getByLabel("密码", { exact: true }).fill(account.password);
+    await page.getByLabel("确认密码").fill(account.password);
+    await page.getByLabel(/初始化码/).fill(code);
+    await page.getByRole("button", { name: /创建并开始/ }).click();
+  } else {
+    await page.getByRole("tab", { name: "注册账号" }).click();
+    await page.getByLabel("显示名称").fill(account.displayName);
+    await page.getByLabel("用户名").fill(account.username);
+    await page.getByLabel("密码", { exact: true }).fill(account.password);
+    await page.getByLabel("注册邀请码或初始化码").fill(code);
+    await page.getByRole("button", { name: "注册并登录" }).click();
   }
-  await page.getByRole("button", { name: "注册并登录" }).click();
+  await dismissOnboarding(page);
 }
 
 async function projectId(context: BrowserContext): Promise<string> {
@@ -54,7 +85,11 @@ async function projectId(context: BrowserContext): Promise<string> {
 test("two-person research workflow covers scheduling, collaboration, resources, and review", async ({ browser, page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
+    if (message.type() !== "error") return;
+    // 浏览器对 /favicon.ico 和未登录时的 /api/auth/me 会记 404/401，属于预期噪音。
+    const url = message.location().url;
+    if (url.endsWith("/favicon.ico") || url.endsWith("/api/auth/me")) return;
+    consoleErrors.push(message.text());
   });
 
   await register(page, leader, "e2e-bootstrap-code", true);
@@ -123,7 +158,11 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
   });
   const memberPage = await memberContext.newPage();
   memberPage.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
+    if (message.type() !== "error") return;
+    // 浏览器对 /favicon.ico 和未登录时的 /api/auth/me 会记 404/401，属于预期噪音。
+    const url = message.location().url;
+    if (url.endsWith("/favicon.ico") || url.endsWith("/api/auth/me")) return;
+    consoleErrors.push(message.text());
   });
 
   try {
@@ -132,6 +171,8 @@ test("two-person research workflow covers scheduling, collaboration, resources, 
     await memberPage.getByLabel("六位项目邀请码").fill(inviteCode);
     await memberPage.getByRole("button", { name: "加入团队与项目" }).click();
     await expect(memberPage.locator(".topbar-project strong")).toHaveText("全国大学生创新训练项目");
+    // 教程可能到工作区才弹出来，这里再关一次。
+    await dismissOnboarding(memberPage);
     const memberWorkspaceTour = memberPage.locator('[data-tour-section="workspace"]');
     await expect(memberWorkspaceTour).toBeVisible();
     await memberWorkspaceTour.getByRole("button", { name: "跳过本段" }).click();
