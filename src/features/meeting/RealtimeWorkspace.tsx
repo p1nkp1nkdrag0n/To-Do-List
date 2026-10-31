@@ -378,9 +378,6 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
           </div>
           {submitError !== "" ? <p className="form-error">{submitError}</p> : null}
           <div className="realtime-review-foot">
-            <button className="secondary-button" type="button" onClick={() => setReview(null)}>
-              返回修改字幕
-            </button>
             <button
               className="primary-button"
               type="button"
@@ -413,14 +410,9 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
             </p>
           ) : null}
           {lines.map((line, index) => (
-            <textarea
-              key={index}
-              className="realtime-line"
-              value={line}
-              rows={Math.max(1, Math.ceil(line.length / 36))}
-              aria-label={`第 ${index + 1} 句字幕`}
-              onChange={(event) => replaceLine(index, event.target.value)}
-            />
+            <p key={index} className="realtime-line">
+              {line}
+            </p>
           ))}
           {partial !== "" ? <p className="realtime-partial">{partial}</p> : null}
         </div>
