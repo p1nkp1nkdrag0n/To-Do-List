@@ -2,6 +2,12 @@
  * 浏览器麦克风 → 服务端实时桥 → 思必驰实时转写。
  *
  * 音频统一转成 16k / 16bit / 单声道 PCM，按 40ms 一帧发送（1280 字节）。
+ *
+ * 生命周期约定：
+ *  - 每次 start 分配一个会话代次（generation）；stop / 卸载会让旧代次失效。
+ *  - 每个 await 之后都检查代次，迟到的麦克风流必须就地 stop，不能继续建连接。
+ *  - WS 的 error / close 统一走幂等 cleanup，确保麦克风被释放。
+ *  - 停止计时器只关闭“停止时那一个 socket”，不会误关新会话。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -36,8 +42,18 @@ export function useRealtimeTranscription(): RealtimeTranscription {
   const processorRef = useRef<ScriptProcessorNode | undefined>(undefined);
   const pendingRef = useRef<Float32Array>(new Float32Array(0));
   const partialRef = useRef("");
+  const generationRef = useRef(0);
+  const stopTimerRef = useRef<number | undefined>(undefined);
 
-  const cleanup = useCallback(() => {
+  const clearStopTimer = useCallback(() => {
+    if (stopTimerRef.current !== undefined) {
+      window.clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = undefined;
+    }
+  }, []);
+
+  /** 释放音频资源；可重复调用。 */
+  const cleanupAudio = useCallback(() => {
     processorRef.current?.disconnect();
     processorRef.current = undefined;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -47,6 +63,20 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     pendingRef.current = new Float32Array(0);
   }, []);
 
+  const cleanupAll = useCallback(() => {
+    clearStopTimer();
+    cleanupAudio();
+    const socket = wsRef.current;
+    wsRef.current = undefined;
+    if (socket !== undefined) {
+      try {
+        socket.close();
+      } catch {
+        // 已关闭则忽略。
+      }
+    }
+  }, [cleanupAudio, clearStopTimer]);
+
   const pushLine = useCallback((raw: string) => {
     const text = raw.trim();
     if (text === "") return;
@@ -54,23 +84,35 @@ export function useRealtimeTranscription(): RealtimeTranscription {
   }, []);
 
   const stop = useCallback(() => {
-    try {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "stop" }));
+    // 先让旧代次失效：迟到的 getUserMedia / resume 回来时会自行停止。
+    generationRef.current += 1;
+    clearStopTimer();
+
+    const socket = wsRef.current;
+    wsRef.current = undefined;
+    if (socket !== undefined) {
+      try {
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "stop" }));
+      } catch {
+        // 忽略。
       }
-    } catch {
-      // ignore
+      // 只关“停止时的那一个 socket”；新会话不会被旧计时器误关。
+      stopTimerRef.current = window.setTimeout(() => {
+        stopTimerRef.current = undefined;
+        try {
+          socket.close();
+        } catch {
+          // 忽略。
+        }
+      }, 300);
     }
-    window.setTimeout(() => {
-      wsRef.current?.close();
-      wsRef.current = undefined;
-    }, 300);
-    cleanup();
+
+    cleanupAudio();
     setStatus("idle");
     setPartial("");
     partialRef.current = "";
     setLevel(0);
-  }, [cleanup]);
+  }, [cleanupAudio, clearStopTimer]);
 
   const reset = useCallback(() => {
     setLines([]);
@@ -80,15 +122,32 @@ export function useRealtimeTranscription(): RealtimeTranscription {
   }, []);
 
   useEffect(() => () => {
-    wsRef.current?.close();
-    cleanup();
-  }, [cleanup]);
+    generationRef.current += 1;
+    cleanupAll();
+  }, [cleanupAll]);
 
   const start = useCallback(async (projectId: string, deviceId?: string) => {
+    // 开始新会话前，先让上一代失效并释放资源。
+    generationRef.current += 1;
+    const generation = generationRef.current;
+    clearStopTimer();
+    // 上一次会话的 socket 可能还在 300ms 关闭窗口里；新会话开始时直接关掉它。
+    const previousSocket = wsRef.current;
+    wsRef.current = undefined;
+    if (previousSocket !== undefined) {
+      try {
+        previousSocket.close();
+      } catch {
+        // 忽略。
+      }
+    }
+    cleanupAudio();
+
     setError("");
     setLines([]);
     setPartial("");
     setStatus("connecting");
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -100,14 +159,26 @@ export function useRealtimeTranscription(): RealtimeTranscription {
           autoGainControl: false,
         },
       });
+
+      // 授权返回时如果用户已经停止/离开，就地停掉这条流，不继续建连接。
+      if (generation !== generationRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
 
       // 用系统默认采样率采集，再自己降采样到 16k。
       // 直接把 AudioContext 设成 16k 时，部分阵列麦克风会被浏览器重采样成低频振荡，
       // 结果就是“有音量但识别不出任何字”。
       const context = new AudioContext();
-      contextRef.current = context;
       await context.resume();
+      if (generation !== generationRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        void context.close().catch(() => undefined);
+        return;
+      }
+      contextRef.current = context;
+
       const source = context.createMediaStreamSource(stream);
       // 阵列麦克风有时会带很低的直流/次声漂移，听感是“有音量”，
       // 但识别服务只听到 8Hz 振荡。加一个 80Hz 高通把这段滤掉。
@@ -125,15 +196,24 @@ export function useRealtimeTranscription(): RealtimeTranscription {
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
-      ws.onopen = () => setStatus("live");
+      const isCurrent = () => generation === generationRef.current;
+
+      ws.onopen = () => {
+        if (isCurrent()) setStatus("live");
+      };
       ws.onerror = () => {
+        if (!isCurrent()) return;
         setError("实时连接失败，请检查网络或思必驰配置。");
         setStatus("error");
+        cleanupAudio();
       };
       ws.onclose = () => {
-        if (status !== "error") setStatus((current) => (current === "live" ? "idle" : current));
+        if (!isCurrent()) return;
+        cleanupAudio();
+        setStatus((current) => (current === "live" || current === "connecting" ? "idle" : current));
       };
       ws.onmessage = (event) => {
+        if (!isCurrent()) return;
         try {
           const message = JSON.parse(String(event.data)) as {
             type?: string;
@@ -161,24 +241,25 @@ export function useRealtimeTranscription(): RealtimeTranscription {
           if (message.type === "error") {
             setError(message.message ?? "识别服务出错。");
             setStatus("error");
+            cleanupAudio();
           }
         } catch {
-          // ignore malformed
+          // 忽略格式错误的消息。
         }
       };
 
       processor.onaudioprocess = (event) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
+        if (!isCurrent() || ws.readyState !== WebSocket.OPEN) return;
         const input = event.inputBuffer.getChannelData(0);
         const ratio = context.sampleRate / SAMPLE_RATE;
         // 线性插值降采样到 16k；ratio=3 时相当于每 3 个点取一个中间值。
         const outLength = Math.max(1, Math.floor(input.length / ratio));
         const resampled = new Float32Array(outLength);
         for (let index = 0; index < outLength; index += 1) {
-          const source = index * ratio;
-          const low = Math.floor(source);
+          const sourceIndex = index * ratio;
+          const low = Math.floor(sourceIndex);
           const high = Math.min(input.length - 1, low + 1);
-          const weight = source - low;
+          const weight = sourceIndex - low;
           resampled[index] = input[low]! * (1 - weight) + input[high]! * weight;
         }
         // 电平：让用户一眼看出麦克风到底有没有收到声音。
@@ -218,6 +299,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
       highpass.connect(processor);
       processor.connect(context.destination);
     } catch (caught) {
+      if (generation !== generationRef.current) return;
       const error = caught as { name?: string; message?: string };
       const name = error.name ?? "";
       setError(
@@ -232,9 +314,9 @@ export function useRealtimeTranscription(): RealtimeTranscription {
                 : `启动麦克风失败：${error.message ?? String(caught)}`,
       );
       setStatus("error");
-      cleanup();
+      cleanupAudio();
     }
-  }, [cleanup, status]);
+  }, [cleanupAudio, clearStopTimer, pushLine]);
 
   const replaceLine = useCallback((index: number, text: string) => {
     setLines((current) => current.map((line, position) => (position === index ? text : line)));

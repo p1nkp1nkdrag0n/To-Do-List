@@ -20,6 +20,7 @@ import type {
 } from "./events.js";
 import { MeetingControl } from "./control.js";
 import { extractTasksFromText, type ExtractedTask } from "./extractor.js";
+import { requireNumberField, requireToolOk } from "./tool-result.js";
 
 export interface OrchestratorOptions {
   projectId: string;
@@ -227,7 +228,8 @@ export class MeetingOrchestrator {
       { projectId },
       (payload) => String(payload.summary ?? `${payload.count ?? 0} 条冲突`),
     );
-    const conflictsBefore = Number(conflictsOutcome.payload.count ?? 0);
+    requireToolOk(conflictsOutcome, "check_conflicts");
+    const conflictsBefore = requireNumberField(conflictsOutcome, "count", "check_conflicts");
 
     if (conflictsBefore === 0) {
       this.emit({
@@ -246,6 +248,7 @@ export class MeetingOrchestrator {
       { projectId },
       (payload) => `${(payload.tasks as unknown[])?.length ?? 0} 个任务`,
     );
+    requireToolOk(tasksOutcome, "get_tasks");
     const participantIndex = new Map<
       string,
       { displayName: string; taskTitle: string; estimatedHours: number }
@@ -321,6 +324,7 @@ export class MeetingOrchestrator {
       },
     );
 
+    requireToolOk(planOutcome, "plan_reschedule");
     const plans = (planOutcome.payload.plans as PlanSummary[]) ?? [];
     if (plans.length === 0) {
       throw new Error("协调员没有找到任何候选方案。");
@@ -555,11 +559,14 @@ export class MeetingOrchestrator {
           { projectId, title: task.title, startDate: today, dueDate },
           (payload) => `已建「${String(payload.title ?? task.title)}」`,
         );
+        requireToolOk(createdTask, "create_task");
         const taskId = String(createdTask.payload.taskId ?? "");
-        if (taskId === "") continue;
+        if (taskId === "") {
+          throw new Error("create_task 没有返回 taskId，已终止本次处理。");
+        }
 
         if (userId !== undefined) {
-          await this.callTool(
+          const assigned = await this.callTool(
             client,
             "assign_member",
             {
@@ -572,6 +579,7 @@ export class MeetingOrchestrator {
             },
             (payload) => String(payload.summary ?? "已分配"),
           );
+          requireToolOk(assigned, "assign_member");
         } else {
           unassignedCount += 1;
         }
@@ -613,7 +621,7 @@ export class MeetingOrchestrator {
           dependencyTitle.includes(candidate.task.title),
         );
         if (predecessor === undefined) continue;
-        await this.callTool(
+        const dependencyOutcome = await this.callTool(
           client,
           "set_dependency",
           {
@@ -623,6 +631,7 @@ export class MeetingOrchestrator {
           },
           () => `「${item.task.title}」依赖「${predecessor.task.title}」`,
         );
+        requireToolOk(dependencyOutcome, "set_dependency");
       }
 
       this.emit({

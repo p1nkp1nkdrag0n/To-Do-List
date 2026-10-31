@@ -83,7 +83,8 @@ const CorrectTextSchema = z.object({
 const RunWithMinutesSchema = z
   .object({
     projectId: z.string().min(1),
-    minutes: z.string().max(20_000).optional(),
+    // 与 draft/correct/summary 保持一致：长会议转写可能超过 2 万字。
+    minutes: z.string().max(200_000).optional(),
     lockOwners: z.boolean().optional(),
     replaceSchedule: z.boolean().optional(),
     // 确认面板确认过的任务：有这份清单就不再重新抽取。
@@ -135,6 +136,9 @@ function saveLastApplied(plans: Map<string, AppliedPlanRecord>): void {
 }
 
 interface AsrJob {
+  /** 任务归属：只有创建者本人能读取结果。 */
+  userId: string;
+  projectId?: string;
   status: "running" | "done" | "error";
   progress: number;
   note: string;
@@ -243,7 +247,7 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       let result;
       try {
         result =
-          trimmed === ""
+          trimmed === "" && (tasks === undefined || tasks.length === 0)
             ? await orchestrator.run()
             : await orchestrator.runFromMinutes(trimmed);
       } catch (error) {
@@ -458,8 +462,23 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         throw new HttpError(400, "EMPTY_FILE", "没有收到音频内容。");
       }
 
+      const rawProjectId = request.headers["x-project-id"];
+      let projectId: string | undefined;
+      if (typeof rawProjectId === "string" && rawProjectId !== "") {
+        // 带项目时先校验成员身份；失败直接拒绝，不创建任务。
+        new AvailabilityService(dependencies).projectSummary(response.locals.auth, rawProjectId);
+        projectId = rawProjectId;
+      }
+
       const jobId = randomUUID();
-      asrJobs.set(jobId, { status: "running", progress: 0, note: "准备上传", createdAt: Date.now() });
+      asrJobs.set(jobId, {
+        userId: response.locals.auth.user.id,
+        ...(projectId !== undefined ? { projectId } : {}),
+        status: "running",
+        progress: 0,
+        note: "准备上传",
+        createdAt: Date.now(),
+      });
       void transcribeAudio({
         config,
         filename,
@@ -479,19 +498,22 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
             text: transcript.text,
             hotwords,
           });
-          asrJobs.set(jobId, {
-            status: "done",
-            progress: 100,
-            note: "转写完成",
-            text: corrected,
-            segments: transcript.segments,
-            durationMs: transcript.durationMs,
-            createdAt: Date.now(),
-          });
+          const finished = asrJobs.get(jobId);
+          if (finished !== undefined) {
+            Object.assign(finished, {
+              status: "done",
+              progress: 100,
+              note: "转写完成",
+              text: corrected,
+              segments: transcript.segments,
+              durationMs: transcript.durationMs,
+            });
+          }
         })
         .catch((error: unknown) => {
           const message = error instanceof AsrError ? error.message : error instanceof Error ? error.message : String(error);
-          asrJobs.set(jobId, { status: "error", progress: 0, note: message, createdAt: Date.now() });
+          const failed = asrJobs.get(jobId);
+          if (failed !== undefined) Object.assign(failed, { status: "error", progress: 0, note: message });
         });
 
       response.status(202).json({ jobId });
@@ -501,7 +523,10 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
   router.get("/transcribe/:jobId", (request, response) => {
     pruneAsrJobs();
     const job = asrJobs.get(request.params.jobId);
-    if (job === undefined) throw new HttpError(404, "ASR_JOB_NOT_FOUND", "找不到这个转写任务。");
+    // 归属不符时返回 404，而不是 403：避免暴露“这个 jobId 存在”。
+    if (job === undefined || job.userId !== response.locals.auth.user.id) {
+      throw new HttpError(404, "ASR_JOB_NOT_FOUND", "找不到这个转写任务。");
+    }
     response.json(job);
   });
 

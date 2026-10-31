@@ -333,9 +333,9 @@ export function MeetingView({
   }, [currentUserId, projectId]);
 
   /** 从粘贴的会议纪要开始：抽任务 → 建库 → 排期 → 修复，全自动。 */
-  const startFromMinutes = useCallback(async (override?: string, confirmedTasks?: ReviewTask[]) => {
+  const startFromMinutes = useCallback(async (override?: string, confirmedTasks?: ReviewTask[]): Promise<boolean> => {
     const trimmed = (override ?? minutesText).trim();
-    if (trimmed === "") return;
+    if (trimmed === "") return false;
     setMinutesOpen(false);
     setInputMode("minutes");
     setError("");
@@ -370,9 +370,11 @@ export function MeetingView({
       setUndoAvailable(result.undoAvailable ?? false);
       setPhase("done");
       persistRun(result);
+      return true;
     } catch (caught) {
       setError(errorMessage(caught));
       setPhase("failed");
+      return false;
     }
   }, [lockOwners, minutesText, projectId, replaceSchedule]);
 
@@ -386,6 +388,7 @@ export function MeetingView({
         headers: {
           "content-type": file.type || "application/octet-stream",
           "x-filename": encodeURIComponent(file.name),
+          "x-project-id": projectId,
         },
         body: file,
       });
@@ -461,6 +464,7 @@ export function MeetingView({
         headers: {
           "Content-Type": "application/octet-stream",
           "x-filename": encodeURIComponent(file.name),
+          "x-project-id": projectId,
           // 把项目成员的名字作为热词，减少同音字误识别。
           ...(hotwords.length > 0
             ? { "x-hotwords": encodeURIComponent(JSON.stringify(hotwords)) }
@@ -670,9 +674,12 @@ export function MeetingView({
           onFinish={async (text, tasks) => {
             setMinutesText(text);
             setInputMode("minutes");
-            setRealtimeMode(false);
-            await startFromMinutes(text, tasks);
-            void saveMeetingSummary(text, tasks);
+            const ok = await startFromMinutes(text, tasks);
+            if (ok) {
+              setRealtimeMode(false);
+              void saveMeetingSummary(text, tasks);
+            }
+            return ok;
           }}
         />
       </div>

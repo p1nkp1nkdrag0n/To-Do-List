@@ -27,7 +27,7 @@ interface RealtimeWorkspaceProps {
   projectId: string;
   members: string[];
   onExit: () => void;
-  onFinish: (text: string, tasks: ReviewTask[]) => Promise<void> | void;
+  onFinish: (text: string, tasks: ReviewTask[]) => Promise<boolean>;
 }
 
 export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: RealtimeWorkspaceProps) {
@@ -41,7 +41,9 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
   const [drafting, setDrafting] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [finishing, setFinishing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [review, setReview] = useState<{ text: string; tasks: ReviewTask[] } | null>(null);
+  const [submitError, setSubmitError] = useState("");
   const draftTimer = useRef<number | undefined>(undefined);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const correctedCount = useRef(0);
@@ -134,7 +136,8 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
         .then((result) => result.tasks)
         .catch(() => []);
       if (draft.length === 0) {
-        await onFinish(corrected, []);
+        const ok = await onFinish(corrected, []);
+        if (!ok) setSubmitError("提交失败：排期没有生成，请重试。");
         return;
       }
       setReview({ text: corrected, tasks: draft });
@@ -264,6 +267,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
               </div>
             ))}
           </div>
+          {submitError !== "" ? <p className="form-error">{submitError}</p> : null}
           <div className="realtime-review-foot">
             <button className="secondary-button" type="button" onClick={() => setReview(null)}>
               返回修改字幕
@@ -271,10 +275,23 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
             <button
               className="primary-button"
               type="button"
-              disabled={review.tasks.length === 0}
-              onClick={() => void onFinish(review.text, review.tasks)}
+              disabled={review.tasks.length === 0 || submitting}
+              onClick={() => {
+                setSubmitError("");
+                void (async () => {
+                  setSubmitting(true);
+                  try {
+                    const ok = await onFinish(review.text, review.tasks);
+                    if (!ok) {
+                      setSubmitError("提交失败，任务清单与编辑内容已保留，可直接重试。");
+                    }
+                  } finally {
+                    setSubmitting(false);
+                  }
+                })();
+              }}
             >
-              确认并生成排期
+              {submitting ? "正在生成…" : "确认并生成排期"}
             </button>
           </div>
         </div>
