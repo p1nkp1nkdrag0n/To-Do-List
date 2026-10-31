@@ -91,11 +91,14 @@ const RunWithMinutesSchema = z
     tasks: z
       .array(
         z.object({
+          clientTaskId: z.string().min(1).max(120).optional(),
           title: z.string().min(1).max(60),
           ownerName: z.string().min(1),
+          ownerUserId: z.string().min(1).nullable().optional(),
           estimatedHours: z.number().positive().max(200),
           dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
           dependsOnTitle: z.string().max(60).nullish(),
+          predecessorClientTaskIds: z.array(z.string().min(1).max(120)).max(60).optional(),
         }),
       )
       .max(60)
@@ -195,11 +198,17 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       if (controls.has(projectId)) {
         throw new HttpError(409, "MEETING_BUSY", "这个项目已经有一轮在处理了，等它跑完再试。");
       }
+      const scheduleRow = dependencies.database.get<{ schedule_revision: number }>(
+        "SELECT schedule_revision FROM projects WHERE id = ? AND deleted_at IS NULL",
+        [projectId],
+      );
       const control = new MeetingControl();
       controls.set(projectId, control);
       const orchestratorOptions: ConstructorParameters<typeof MeetingOrchestrator>[0] = {
         projectId,
         confirmedTasks: tasks,
+        expectedScheduleRevision: scheduleRow?.schedule_revision,
+        replaceSchedule: replaceSchedule === true,
         control,
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
         paceMs: Number(process.env.MEETING_PACE_MS ?? 1200),

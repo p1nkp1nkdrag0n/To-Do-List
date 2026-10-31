@@ -46,11 +46,19 @@ export interface OrchestratorOptions {
   actingUserName?: string;
   /** 确认面板确认过的任务：给了就不再重新抽取。 */
   confirmedTasks?: Array<{
+    clientTaskId?: string;
     title: string;
     ownerName: string;
+    ownerUserId?: string | null;
     estimatedHours: number;
     dueDate?: string | null;
+    dependsOnTitle?: string | null;
+    predecessorClientTaskIds?: string[];
   }>;
+  /** 用户确认/抽取开始时的排期版本；批量替换必须带上。 */
+  expectedScheduleRevision?: number;
+  /** true 表示走 replace_schedule 单事务重建。 */
+  replaceSchedule?: boolean;
   /**
    * 纪要解析成功、任务即将创建之前调用（用于「按纪要重建」时清空旧排期）。
    * 解析失败不会调用，所以坏纪要不会提前把旧排期删掉。
@@ -519,6 +527,87 @@ export class MeetingOrchestrator {
           ...extraction.warnings,
         ].filter((line) => line !== "");
         throw new Error(`没能从这段纪要里抽出任务。\n${hints.join("\n")}`);
+      }
+
+      // 2.5 确认清单走批量提交：一个事务删旧 + 建新，失败旧排期不动。
+      if (
+        this.options.replaceSchedule === true &&
+        this.options.confirmedTasks !== undefined &&
+        this.options.expectedScheduleRevision !== undefined
+      ) {
+        const batchTasks = extraction.tasks as Array<
+          ExtractedTask & {
+            clientTaskId?: string;
+            ownerUserId?: string | null;
+            predecessorClientTaskIds?: string[];
+          }
+        >;
+        const candidates = batchTasks.map((task, index) => {
+          const userId =
+            task.ownerUserId ??
+            (task.ownerName === "未分配" ? undefined : memberByName.get(task.ownerName));
+          if (userId === undefined && task.ownerName !== "未分配") {
+            throw new Error(`负责人「${task.ownerName}」不在当前项目成员里，整批未提交。`);
+          }
+          const rawDue = task.dueDate ?? null;
+          const dueDate = rawDue === null || rawDue < today ? addDays(today, 7) : rawDue;
+          const clientTaskId = task.clientTaskId ?? `task-${index}`;
+          return {
+            clientTaskId,
+            title: task.title,
+            ownerUserId: userId ?? null,
+            estimatedMinutes: Math.round(task.estimatedHours * 60),
+            startDate: today,
+            dueDate,
+            predecessorClientTaskIds:
+              task.predecessorClientTaskIds ??
+              (task.dependsOnTitle === undefined || task.dependsOnTitle === null
+                ? []
+                : batchTasks
+                    .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+                    .filter(
+                      ({ candidate }) =>
+                        candidate.title.includes(task.dependsOnTitle!) ||
+                        task.dependsOnTitle!.includes(candidate.title),
+                    )
+                    .map(({ candidateIndex }) =>
+                      (batchTasks[candidateIndex] as { clientTaskId?: string }).clientTaskId ??
+                      `task-${candidateIndex}`,
+                    )),
+          };
+        });
+
+        const outcome = await this.callTool(
+          client,
+          "replace_schedule",
+          {
+            projectId,
+            expectedScheduleRevision: this.options.expectedScheduleRevision,
+            replaceSchedule: true,
+            tasks: candidates,
+          },
+          (payload) => `已提交 ${String(payload.count ?? candidates.length)} 条任务`,
+        );
+        requireToolOk(outcome, "replace_schedule");
+        const taskIds = (outcome.payload.taskIds as string[]) ?? [];
+        const created = candidates.map((candidate, index) => ({
+          task: batchTasks[index]!,
+          taskId: taskIds[index] ?? "",
+        }));
+        this.options.onDataChanged?.(projectId);
+        this.emit({
+          type: "plan.ready",
+          at: new Date().toISOString(),
+          message: `已在一个事务内把 ${created.length} 条待办写进排期，开始检查冲突`,
+          detail: {
+            tasks: created.map((item) => ({
+              title: item.task.title,
+              owner: item.task.ownerName,
+              hours: item.task.estimatedHours,
+            })),
+          },
+        });
+        return this.resolveConflicts(client);
       }
 
       // 2.5 解析成功后才清空旧排期；解析失败会在上面直接抛错，旧数据不受影响。

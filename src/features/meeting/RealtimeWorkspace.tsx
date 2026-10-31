@@ -17,15 +17,22 @@ interface DraftTask {
 }
 
 export interface ReviewTask {
+  clientTaskId: string;
   title: string;
   ownerName: string;
+  ownerUserId: string | null;
   estimatedHours: number;
   dueDate: string | null;
 }
 
+export interface RealtimeMember {
+  userId: string;
+  displayName: string;
+}
+
 interface RealtimeWorkspaceProps {
   projectId: string;
-  members: string[];
+  members: RealtimeMember[];
   onExit: () => void;
   onFinish: (text: string, tasks: ReviewTask[]) => Promise<boolean>;
 }
@@ -140,7 +147,17 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
         if (!ok) setSubmitError("提交失败：排期没有生成，请重试。");
         return;
       }
-      setReview({ text: corrected, tasks: draft });
+      setReview({
+        text: corrected,
+        tasks: draft.map((task, index) => ({
+          clientTaskId: `review-${Date.now()}-${index}`,
+          title: task.title,
+          ownerName: task.ownerName,
+          ownerUserId: members.find((member) => member.displayName === task.ownerName)?.userId ?? null,
+          estimatedHours: task.estimatedHours,
+          dueDate: task.dueDate,
+        })),
+      });
     } finally {
       setFinishing(false);
     }
@@ -229,17 +246,22 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                   }}
                 />
                 <select
-                  value={task.ownerName}
+                  value={task.ownerUserId ?? "未分配"}
                   onChange={(event) => {
                     const next = { ...review, tasks: [...review.tasks] };
-                    next.tasks[index] = { ...task, ownerName: event.target.value };
+                    const member = members.find((item) => item.userId === event.target.value);
+                    next.tasks[index] = {
+                      ...task,
+                      ownerUserId: member?.userId ?? null,
+                      ownerName: member?.displayName ?? "未分配",
+                    };
                     setReview(next);
                   }}
                 >
                   <option value="未分配">未分配</option>
                   {members.map((member) => (
-                    <option key={member} value={member}>
-                      {member}
+                    <option key={member.userId} value={member.userId}>
+                      {member.displayName}
                     </option>
                   ))}
                 </select>
