@@ -33,12 +33,14 @@ export interface ScheduleFixture {
 export interface ScheduleFixtureOptions {
   uploadPath?: string;
   maxUploadBytes?: number;
+  /** 指定后使用文件库，便于 HTTP→MCP 子进程共享同一个 SQLite。 */
+  dbPath?: string;
 }
 
 export function createScheduleFixture(
   options: ScheduleFixtureOptions = {},
 ): ScheduleFixture {
-  const database = openV2Database(":memory:");
+  const database = openV2Database(options.dbPath ?? ":memory:");
   migrateV2Database(database, () => SCHEDULE_NOW.toISOString());
   const application = createV2App({
     database,
