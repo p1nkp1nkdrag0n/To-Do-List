@@ -10,8 +10,10 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { pickDataRoot, migrateDataRoot, readLauncherConfig, writeLauncherConfig, findLegacyDataRoots } from "./data-root.mjs";
+import { readLauncherConfig, writeLauncherConfig } from "./data-root.mjs";
+import { resolveDataDirectory } from "./launcher-data-flow.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, "..", "app");
@@ -19,19 +21,14 @@ const serverEntry = path.join(appRoot, "dist-server", "server", "v2.js");
 const mcpEntry = path.join(appRoot, "dist-server", "server", "mcp", "main.js");
 
 const programRoot = path.resolve(here, "..");
-const dataRoot = pickDataRoot({ programRoot });
-// Do not silently open an empty database when a previous unsafe fallback exists.
-if (!process.env.TODOLIST_MIGRATE_FROM) {
-  const legacyRoots = findLegacyDataRoots({ destination: dataRoot, programRoot });
-  if (legacyRoots.length > 0) throw new Error(`发现旧数据：${legacyRoots.join("；")}。请关闭旧程序，选择需要迁移的旧数据根目录设置 TODOLIST_MIGRATE_FROM 及 TODOLIST_MIGRATION_OFFLINE=1 后重启；不会覆盖或删除原数据。`);
-}
-
-if (process.env.TODOLIST_MIGRATE_FROM) {
-  if (process.env.TODOLIST_MIGRATION_OFFLINE !== "1") {
-    throw new Error("迁移前请关闭旧程序，并明确设置 TODOLIST_MIGRATION_OFFLINE=1。旧数据不会被删除。");
-  }
-  migrateDataRoot(process.env.TODOLIST_MIGRATE_FROM, dataRoot);
-}
+const dataRoot = await resolveDataDirectory({
+  programRoot,
+  isInteractive: Boolean(process.stdin.isTTY),
+  ask: async question => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try { return await rl.question(question); } finally { rl.close(); }
+  },
+});
 const configPath = path.join(dataRoot, "config.json");
 const dataDir = path.join(dataRoot, "data");
 const readConfig = () => readLauncherConfig(configPath);

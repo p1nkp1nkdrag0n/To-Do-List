@@ -19,6 +19,7 @@ if (-not (Test-Path (Join-Path $release "node.exe"))) {
 # sync latest launcher
 Copy-Item (Join-Path $root "packaging\launcher\launch.mjs") (Join-Path $release "launcher\launch.mjs") -Force
 Copy-Item (Join-Path $root "packaging\launcher\data-root.mjs") (Join-Path $release "launcher\data-root.mjs") -Force
+Copy-Item (Join-Path $root "packaging\launcher\launcher-data-flow.mjs") (Join-Path $release "launcher\launcher-data-flow.mjs") -Force
 
 # Refresh app/dist and app/dist-server from the repo first. Without this the
 # exe keeps shipping whatever build happened to be copied into release last
