@@ -10,6 +10,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { pickDataRoot, migrateDataRoot, readLauncherConfig, writeLauncherConfig, findLegacyDataRoots } from "./data-root.mjs";
 
@@ -17,6 +18,45 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, "..", "app");
 const serverEntry = path.join(appRoot, "dist-server", "server", "v2.js");
 const mcpEntry = path.join(appRoot, "dist-server", "server", "mcp", "main.js");
+
+function pathState(target) {
+  try {
+    fs.statSync(target);
+    return "exists";
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing";
+    // EACCES/EPERM 等表示“无法判断”，不能当成不存在。
+    return "unknown";
+  }
+}
+
+async function confirmDirectory(question) {
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      "AppData 不可写，且当前不是交互式终端。请设置 TODOLIST_DATA_ROOT 为可写绝对路径后重试。",
+    );
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(question + " [y/N] ");
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+function writePointer(pointer, value) {
+  try {
+    fs.writeFileSync(pointer, value, { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      const saved = fs.readFileSync(pointer, "utf8").trim();
+      if (saved === value) return;
+      throw new Error("数据目录指针已存在且指向另一个目录，已停止启动：" + saved);
+    }
+    throw new Error("无法保存数据目录选择，已停止启动：" + (error?.message ?? String(error)));
+  }
+}
 
 const programRoot = path.resolve(here, "..");
 let dataRoot;
@@ -27,8 +67,11 @@ if (process.env.TODOLIST_DATA_ROOT) {
   const exeDir = process.env.TODOLIST_EXE_DIR;
   const pointer = exeDir ? path.join(exeDir, "todolist-data-root.txt") : undefined;
   if (pointer && fs.existsSync(pointer)) {
-    // 上次确认过的持久目录；之后不可用要报错，不能自动换库。
+    // 上次确认过的持久目录；空值/相对路径/不可用都要报错，不能自动换库。
     const saved = fs.readFileSync(pointer, "utf8").trim();
+    if (saved === "" || !path.isAbsolute(saved)) {
+      throw new Error("数据目录指针为空或不是绝对路径，已停止启动，请修正或删除：" + pointer);
+    }
     dataRoot = pickDataRoot({
       programRoot,
       env: { ...process.env, TODOLIST_DATA_ROOT: saved },
@@ -43,23 +86,26 @@ if (process.env.TODOLIST_DATA_ROOT) {
         process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
         "ToDoList",
       );
-      if (fs.existsSync(defaultRoot)) {
+      const state = pathState(defaultRoot);
+      if (state !== "missing") {
         throw new Error(
-          "默认数据目录存在但当前不可访问，已停止启动，避免打开另一份空库：" + defaultRoot,
+          "默认数据目录存在或无法判断是否为空，已停止启动，避免打开另一份空库：" + defaultRoot,
         );
       }
       if (!exeDir) throw error;
       const fallback = path.join(exeDir, "ToDoList-data");
+      const confirmed = await confirmDirectory(
+        "AppData 不可写。是否使用 exe 同级数据目录？\n" + fallback,
+      );
+      if (!confirmed) {
+        throw new Error("用户未确认备用数据目录，已停止启动。");
+      }
       dataRoot = pickDataRoot({
         programRoot,
         env: { ...process.env, TODOLIST_DATA_ROOT: fallback },
       });
-      try {
-        fs.writeFileSync(pointer, fallback, { flag: "wx", mode: 0o600 });
-      } catch {
-        // 写不了指针文件时仍然使用本次目录，但下一次会重新判断。
-      }
-      console.log("AppData 不可写，已明确改用 exe 同级数据目录：" + dataRoot);
+      writePointer(pointer, fallback);
+      console.log("已确认使用 exe 同级数据目录：" + dataRoot);
     }
   }
 }

@@ -73,16 +73,24 @@ namespace ToDoListLauncher
                             try
                             {
                                 Directory.CreateDirectory(candidate);
+                                // 用 CreateNew 的占位文件做独占认领；预先存在的目录不会被接管。
+                                using (FileStream claim = new FileStream(
+                                    Path.Combine(candidate, ".claim"),
+                                    FileMode.CreateNew,
+                                    FileAccess.Write,
+                                    FileShare.None))
+                                {
+                                    claim.WriteByte(0);
+                                }
                             }
                             catch (IOException)
                             {
+                                // 已有人先认领：不删除、不接管，换名字重试。
                                 continue;
                             }
                             FileAttributes attributes = File.GetAttributes(candidate);
-                            if ((attributes & FileAttributes.ReparsePoint) != 0 ||
-                                Directory.GetFileSystemEntries(candidate).Length != 0)
+                            if ((attributes & FileAttributes.ReparsePoint) != 0)
                             {
-                                // 不是本次独占创建的空目录：拒绝使用，也绝不删除。
                                 continue;
                             }
                             staging = candidate;
@@ -104,6 +112,8 @@ namespace ToDoListLauncher
                                 throw new Exception("目标版本目录已存在但校验标记不符；为保护数据，未覆盖：" + target);
                             // staging 是 sibling 目录，不会顺带创建 target 的父目录。
                             Directory.CreateDirectory(Path.GetDirectoryName(target));
+                            string claim = Path.Combine(staging, ".claim");
+                            if (File.Exists(claim)) File.Delete(claim);
                             Console.WriteLine("[stage] move begin");
                             Directory.Move(staging, target);
                             Console.WriteLine("[stage] move done");
