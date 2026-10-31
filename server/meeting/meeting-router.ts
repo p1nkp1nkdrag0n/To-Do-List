@@ -99,6 +99,7 @@ const RunWithMinutesSchema = z
           estimatedHours: z.number().positive().max(200),
           dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
           dependsOnTitle: z.string().max(60).nullish(),
+          dependsOnTitles: z.array(z.string().min(1).max(60)).max(20).optional(),
           predecessorClientTaskIds: z.array(z.string().min(1).max(120)).max(60).optional(),
         }),
       )

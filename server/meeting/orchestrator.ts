@@ -53,6 +53,7 @@ export interface OrchestratorOptions {
     estimatedHours: number;
     dueDate?: string | null;
     dependsOnTitle?: string | null;
+    dependsOnTitles?: string[];
     predecessorClientTaskIds?: string[];
   }>;
   /** 用户确认/抽取开始时的排期版本；批量替换必须带上。 */
@@ -532,6 +533,7 @@ export class MeetingOrchestrator {
         ExtractedTask & {
           clientTaskId?: string;
           ownerUserId?: string | null;
+          dependsOnTitles?: string[];
           predecessorClientTaskIds?: string[];
         }
       >;
@@ -567,18 +569,20 @@ export class MeetingOrchestrator {
           throw new Error("负责人已不是当前项目成员，整批未提交。");
         }
 
-        let predecessorClientTaskIds = task.predecessorClientTaskIds ?? [];
-        if (predecessorClientTaskIds.length === 0 && task.dependsOnTitle) {
-          const exact = idsByTitle.get(task.dependsOnTitle) ?? [];
+        const dependencyTitles =
+          task.dependsOnTitles ??
+          (task.dependsOnTitle ? [task.dependsOnTitle] : []);
+        const predecessorClientTaskIds = [...(task.predecessorClientTaskIds ?? [])];
+        for (const dependencyTitle of dependencyTitles) {
+          const exact = idsByTitle.get(dependencyTitle) ?? [];
           if (exact.length > 1) {
-            throw new Error(`依赖标题「${task.dependsOnTitle}」对应多个任务，无法确定前驱。`);
+            throw new Error(`依赖标题「${dependencyTitle}」对应多个任务，无法确定前驱。`);
           }
-          if (exact.length === 1) {
-            predecessorClientTaskIds = exact;
-          } else {
-            // Even a unique substring match can select the wrong task. Never persist
-            // guessed dependencies: the reviewer must supply the exact title or ID.
-            throw new Error(`依赖标题「${task.dependsOnTitle}」没有精确匹配，整批未提交。请在纪要中使用前驱任务的完整标题后重试。`);
+          if (exact.length === 0) {
+            throw new Error(`依赖标题「${dependencyTitle}」没有精确匹配，整批未提交。请在纪要中使用前驱任务的完整标题后重试。`);
+          }
+          if (!predecessorClientTaskIds.includes(exact[0]!)) {
+            predecessorClientTaskIds.push(exact[0]!);
           }
         }
         if (predecessorClientTaskIds.includes(clientTaskId)) {
