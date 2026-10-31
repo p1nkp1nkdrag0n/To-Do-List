@@ -11,8 +11,6 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { socketsToClose } from "./realtime-sockets.js";
-
 export type RealtimeStatus = "idle" | "connecting" | "live" | "error";
 
 export interface RealtimeTranscription {
@@ -50,13 +48,6 @@ export function useRealtimeTranscription(): RealtimeTranscription {
   // 必须还能拿到它并主动关闭，否则旧连接会一直挂着。
   const closingSocketRef = useRef<WebSocket | undefined>(undefined);
 
-  const clearStopTimer = useCallback(() => {
-    if (stopTimerRef.current !== undefined) {
-      window.clearTimeout(stopTimerRef.current);
-      stopTimerRef.current = undefined;
-    }
-  }, []);
-
   /** 释放音频资源；可重复调用。 */
   const cleanupAudio = useCallback(() => {
     processorRef.current?.disconnect();
@@ -77,16 +68,24 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     }
   }, []);
 
-  const cleanupAll = useCallback(() => {
-    // 先取出两个引用，再清空；stop 可能已经把 wsRef 清掉、把 socket 放进 closing。
-    const active = wsRef.current;
-    const closing = closingSocketRef.current;
-    wsRef.current = undefined;
+  /** 取消停止计时器，并关闭“等待 300ms 关闭”的那个 socket。可重复调用。 */
+  const closePendingSocket = useCallback(() => {
+    const timer = stopTimerRef.current;
+    const socket = closingSocketRef.current;
+    stopTimerRef.current = undefined;
     closingSocketRef.current = undefined;
-    clearStopTimer();
+    if (timer !== undefined) window.clearTimeout(timer);
+    closeSocket(socket);
+  }, [closeSocket]);
+
+  const cleanupAll = useCallback(() => {
+    // 先回收待关闭的，再取当前活动的；清引用在 close 之前，避免回调重入。
+    closePendingSocket();
     cleanupAudio();
-    for (const socket of socketsToClose(active, closing)) closeSocket(socket);
-  }, [cleanupAudio, clearStopTimer, closeSocket]);
+    const socket = wsRef.current;
+    wsRef.current = undefined;
+    closeSocket(socket);
+  }, [cleanupAudio, closePendingSocket, closeSocket]);
 
   const pushLine = useCallback((raw: string) => {
     const text = raw.trim();
@@ -97,9 +96,10 @@ export function useRealtimeTranscription(): RealtimeTranscription {
   const stop = useCallback(() => {
     // 先让旧代次失效：迟到的 getUserMedia / resume 回来时会自行停止。
     generationRef.current += 1;
-    clearStopTimer();
+    // 连续 stop 时，先把上一轮 pending 回收，避免被本轮覆盖。
+    closePendingSocket();
 
-    const socket = wsRef.current ?? closingSocketRef.current;
+    const socket = wsRef.current;
     wsRef.current = undefined;
     closingSocketRef.current = socket;
     if (socket !== undefined) {
@@ -108,16 +108,15 @@ export function useRealtimeTranscription(): RealtimeTranscription {
       } catch {
         // 忽略。
       }
-      // 只关“停止时的那一个 socket”；新会话不会被旧计时器误关。
-      stopTimerRef.current = window.setTimeout(() => {
-        stopTimerRef.current = undefined;
-        if (closingSocketRef.current === socket) closingSocketRef.current = undefined;
-        try {
-          socket.close();
-        } catch {
-          // 忽略。
+      // 只关“停止时的那一个 socket”；只有引用仍匹配时才清公共 ref。
+      const timer = window.setTimeout(() => {
+        if (stopTimerRef.current === timer && closingSocketRef.current === socket) {
+          stopTimerRef.current = undefined;
+          closingSocketRef.current = undefined;
         }
+        closeSocket(socket);
       }, 300);
+      stopTimerRef.current = timer;
     }
 
     cleanupAudio();
@@ -125,7 +124,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     setPartial("");
     partialRef.current = "";
     setLevel(0);
-  }, [cleanupAudio, clearStopTimer]);
+  }, [cleanupAudio, closePendingSocket, closeSocket]);
 
   const reset = useCallback(() => {
     setLines([]);
@@ -143,19 +142,8 @@ export function useRealtimeTranscription(): RealtimeTranscription {
     // 开始新会话前，先让上一代失效并释放资源。
     generationRef.current += 1;
     const generation = generationRef.current;
-    clearStopTimer();
-    // 上一次会话的 socket 可能还在 300ms 关闭窗口里；新会话开始时直接关掉它。
-    const previousSocket = wsRef.current ?? closingSocketRef.current;
-    wsRef.current = undefined;
-    closingSocketRef.current = undefined;
-    if (previousSocket !== undefined) {
-      try {
-        previousSocket.close();
-      } catch {
-        // 忽略。
-      }
-    }
-    cleanupAudio();
+    // 开始新会话前，先取消旧计时器、关闭旧连接、释放旧音频。
+    cleanupAll();
 
     setError("");
     setLines([]);
@@ -330,7 +318,7 @@ export function useRealtimeTranscription(): RealtimeTranscription {
       setStatus("error");
       cleanupAudio();
     }
-  }, [cleanupAudio, clearStopTimer, pushLine]);
+  }, [cleanupAll, cleanupAudio, pushLine]);
 
   const replaceLine = useCallback((index: number, text: string) => {
     setLines((current) => current.map((line, position) => (position === index ? text : line)));
