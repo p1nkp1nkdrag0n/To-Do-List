@@ -62,6 +62,16 @@ export function undoPlan(
     };
   }
   const after = plan.afterRevisions;
+  // apply 支持 split 后再对占位 ID 做 extend/reassign；撤销前先统一翻译成真实 ID。
+  const placeholderToReal = new Map(
+    (plan.createdParticipants ?? []).map((item) => [item.placeholderId, item.realId]),
+  );
+  const operations = plan.operations.map((operation) => {
+    if ("participantId" in operation && placeholderToReal.has(operation.participantId)) {
+      return { ...operation, participantId: placeholderToReal.get(operation.participantId)! };
+    }
+    return operation;
+  });
 
   try {
     return db.transaction(() => {
@@ -150,33 +160,30 @@ export function undoPlan(
       };
 
       let reverted = 0;
-      for (const operation of [...plan.operations].reverse()) {
+      for (const operation of [...operations].reverse()) {
         switch (operation.kind) {
           case "split": {
             const mapping = (plan.createdParticipants ?? []).find(
               (item) => item.placeholderId === operation.newParticipantId,
             );
             const createdId = mapping?.realId ?? operation.newParticipantId;
-            const created = participants.get(createdId);
-            if (created === undefined || created.removed_at !== null) {
-              throw new HttpError(409, "UNDO_STALE", "拆出的分工已被删除，已拒绝撤销。");
-            }
-            if (after.participants[createdId] !== created.revision) {
-              throw new HttpError(409, "UNDO_STALE", "拆出的分工已被人工修改，已拒绝撤销。");
-            }
+            const created = requireParticipant(createdId);
+            const removedAt = new Date().toISOString();
             const removed = db.run(
               "UPDATE task_participants SET removed_at = ?, removed_by = ?, updated_by = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND project_id = ? AND revision = ? AND removed_at IS NULL",
               [
-                new Date().toISOString(),
+                removedAt,
                 auth.user.id,
                 auth.user.id,
-                new Date().toISOString(),
+                removedAt,
                 created.id,
                 projectId,
                 created.revision,
               ],
             );
             if (removed.changes !== 1) throw new HttpError(409, "UNDO_STALE", "拆出的分工状态已变化，已拒绝撤销。");
+            created.removed_at = removedAt;
+            created.revision += 1;
             const source = requireParticipant(operation.participantId);
             updateParticipant(source, {
               estimatedMinutes: source.estimated_minutes + operation.moveMinutes,

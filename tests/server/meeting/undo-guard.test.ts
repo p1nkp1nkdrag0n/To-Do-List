@@ -247,4 +247,68 @@ describe("撤销写后版本保护", () => {
     ).toBe(f.ownerId);
   });
 
+
+  it("split → extend(占位 ID) → 撤销：先翻译占位 ID，再按事务内当前版本逆写", () => {
+    const f = fixture();
+    const source = f.schedule.updateParticipant(f.lead, f.projectId, f.participant.id, {
+      expectedRevision: f.participant.revision,
+      estimatedMinutes: 120,
+    }).participant;
+    const created = f.schedule.addParticipant(f.lead, f.projectId, f.task.id, {
+      userId: f.otherId,
+      startDate: "2026-07-20",
+      endDate: "2026-07-25",
+      estimatedMinutes: 480,
+    }).participant;
+    const extended = f.schedule.updateParticipant(f.lead, f.projectId, created.id, {
+      expectedRevision: created.revision,
+      endDate: "2026-07-28",
+    }).participant;
+    const plan: AppliedPlanRecord = {
+      id: "plan-4",
+      label: "拆分后延期",
+      operations: [
+        {
+          kind: "split",
+          participantId: f.participant.id,
+          taskId: f.task.id,
+          fromUserId: f.ownerId,
+          toUserId: f.otherId,
+          moveMinutes: 480,
+          newParticipantId: "placeholder-2",
+        },
+        {
+          kind: "extend",
+          participantId: "placeholder-2",
+          taskId: f.task.id,
+          newEndDate: "2026-07-28",
+          previousEndDate: "2026-07-25",
+        },
+      ],
+      createdParticipants: [
+        {
+          placeholderId: "placeholder-2",
+          realId: created.id,
+          taskId: f.task.id,
+          userId: f.otherId,
+        },
+      ],
+      afterRevisions: {
+        tasks: { [f.task.id]: f.schedule.listTasks(f.lead, f.projectId)[0]!.revision },
+        participants: {
+          [source.id]: source.revision,
+          [extended.id]: extended.revision,
+        },
+      },
+    };
+
+    const result = undoPlan(f.dependencies, f.lead, f.projectId, plan);
+
+    expect(result.reverted).toBe(2);
+    expect(result.skipped).toEqual([]);
+    const participants = f.schedule.listParticipants(f.lead, f.projectId);
+    expect(participants).toHaveLength(1);
+    expect(participants[0]!.estimatedMinutes).toBe(600);
+  });
+
 });
