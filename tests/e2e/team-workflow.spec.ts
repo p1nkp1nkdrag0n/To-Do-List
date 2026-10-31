@@ -62,6 +62,7 @@ async function register(
     await page.getByLabel("用户名").fill(account.username);
     await page.getByLabel("密码", { exact: true }).fill(account.password);
     await page.getByLabel("确认密码").fill(account.password);
+    await page.getByLabel(/初始化码/).fill(code);
     await page.getByRole("button", { name: /创建并开始/ }).click();
   } else {
     await page.getByRole("tab", { name: "注册账号" }).click();
