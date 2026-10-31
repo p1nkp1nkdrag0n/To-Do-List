@@ -378,6 +378,9 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
           </div>
           {submitError !== "" ? <p className="form-error">{submitError}</p> : null}
           <div className="realtime-review-foot">
+            <button className="secondary-button" type="button" onClick={() => setReview(null)}>
+              返回查看字幕
+            </button>
             <button
               className="primary-button"
               type="button"
