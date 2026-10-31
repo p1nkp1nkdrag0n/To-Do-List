@@ -207,12 +207,21 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
         "SELECT schedule_revision FROM projects WHERE id = ? AND deleted_at IS NULL",
         [projectId],
       );
+      const confirmed = tasks !== undefined && tasks.length > 0;
+      const expectedRevision = expectedScheduleRevision ?? scheduleRow?.schedule_revision;
+      if (confirmed && expectedScheduleRevision === undefined) {
+        throw new HttpError(
+          400,
+          "EXPECTED_REVISION_REQUIRED",
+          "确认清单提交必须带上确认时的排期版本，请重新打开确认面板。",
+        );
+      }
       const control = new MeetingControl();
       controls.set(projectId, control);
       const orchestratorOptions: ConstructorParameters<typeof MeetingOrchestrator>[0] = {
         projectId,
         confirmedTasks: tasks,
-        expectedScheduleRevision: expectedScheduleRevision ?? scheduleRow?.schedule_revision,
+        expectedScheduleRevision: expectedRevision,
         replaceSchedule: replaceSchedule === true,
         control,
         // 演示节奏：让「红 → 绿」有个看得见的停顿；设成 0 可以关掉。
@@ -350,6 +359,11 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       )
       .all(projectId) as Array<{ displayName: string }>;
     const memberNames = names.map((member) => member.displayName);
+    // 生成期间也可能有人改排期：在纠错/抽取两个 await 之前就固定版本。
+    const scheduleRevision = dependencies.database.get<{ schedule_revision: number }>(
+      "SELECT schedule_revision FROM projects WHERE id = ? AND deleted_at IS NULL",
+      [projectId],
+    )?.schedule_revision;
     // 实时识别容易把名字听成同音字，先按成员名校正再抽任务。
     const corrected = await correctTranscript({
       userId: auth.user.id,
@@ -357,14 +371,10 @@ export function createMeetingRouter(dependencies: V2RuntimeDependencies): Router
       hotwords: memberNames,
     });
     const extraction = await extractTasksFromText(corrected, memberNames, auth.user.id);
-    const revision = dependencies.database.get<{ schedule_revision: number }>(
-      "SELECT schedule_revision FROM projects WHERE id = ? AND deleted_at IS NULL",
-      [projectId],
-    )?.schedule_revision;
     response.json({
       tasks: extraction.tasks,
       warnings: extraction.warnings,
-      scheduleRevision: revision,
+      scheduleRevision,
     });
   }));
 
