@@ -13,6 +13,7 @@ const rootFiles = new Set([
   "package.json", "package-lock.json", "vite.config.ts", "vitest.config.ts",
   "playwright.config.ts", "tsconfig.json", "tsconfig.app.json", "tsconfig.node.json",
   "tsconfig.server.json",
+  "docs/deployment-guide.md",
 ]);
 
 // Only reviewed source locations are eligible; never walk the deployment directory.

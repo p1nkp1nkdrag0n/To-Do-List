@@ -1,7 +1,7 @@
 # 单文件解压安全边界与验收
 
-本次只修改 C# 解压器，不改系统安全设置。Linux 云端不能编译或执行
-.NET Framework / Windows exe，下面的 Windows 项目仍是发布前验收门槛。
+本文记录 C# 解压器的保护边界。早期验证在 Linux 中使用源码约束和文件系统模型；
+2026-11-01 已补充 Windows 原生方法回归，完整分发 EXE 的首启、升级和交互仍是独立发布验收项。
 
 ## 实现
 
@@ -22,10 +22,15 @@
 ## 证据等级
 
 `node --test tests/packaging/csharp-extraction-safety.test.mjs`
-提供 C# 源码约束检查和 Linux 合成文件系统**模型**失败矩阵：
+提供 C# 源码约束检查和合成文件系统**模型**失败矩阵：
 既有 candidate/claim、payload 同名外来文件、claim 后新增外来条目、
 符号链接模型、目标冲突及复制中断后的保留策略。
 这些测试**不等于 C# 编译、Win32 调用或 Windows junction 验证**。
+
+`node --test tests/packaging/windows-launcher-runtime.test.mjs` 则在 Windows 编译实际
+`Launcher.cs`，直接调用解压器方法验证独占创建、正常 ZIP、外来文件、junction、
+临时 ZIP 句柄、路径长度、必需文件和不安全条目，共 14 个场景。
+该测试使用合成目录，不启动正式应用；非 Windows 环境会跳过。
 
 Windows 隔离环境还须实际验证：
 1. 编译 exe，正常首次解压和同版本复用；

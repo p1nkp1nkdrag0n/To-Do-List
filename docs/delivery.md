@@ -1,5 +1,8 @@
 # 交付说明（会议 → 排期流水线）
 
+> 历史交付记录：本文保留早期 PR 的功能、测试数字与待办，尚未部署、录音关闭、任务数量等表述仅对应当时版本。
+> 当前使用方式见 [README](../README.md)，部署与备份见[部署指南](deployment-guide.md)，后续整合与验证见 [PR #6](https://github.com/p1nkp1nkdrag0n/To-Do-List/pull/6)。不要将下文的演示清空命令用于正式数据。
+
 > 这份文档同时用于 PR 描述。对应 fork：`qyhsktn/To-Do-List`，分支 `main`，基线 `upstream/main`。
 
 ## 一、这次交付了什么
