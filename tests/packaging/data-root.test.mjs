@@ -45,7 +45,7 @@ test("migration refuses active SQLite sidecars, links, overlaps and existing des
   assert.throws(() => migrateDataRoot(from, to), /Stop the old application/);
   assert.equal(fs.existsSync(to), false);
   fs.unlinkSync(path.join(from, "app.sqlite-wal"));
-  fs.symlinkSync(path.join(root, "elsewhere"), path.join(from, "link"));
+  fs.symlinkSync(path.join(root, "elsewhere"), path.join(from, "link"), process.platform === "win32" ? "junction" : "dir");
   assert.throws(() => migrateDataRoot(from, to), /symbolic links/);
   assert.throws(() => migrateDataRoot(from, path.join(from, "nested")), /overlap/);
 });

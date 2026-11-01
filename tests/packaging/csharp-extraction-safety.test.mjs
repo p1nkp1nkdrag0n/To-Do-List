@@ -55,7 +55,7 @@ test("model failure matrix: postclaim foreign entries and symlink refused, not r
   assert.throws(() => assertOwned(staging, owned), /foreign/);
   assert.equal(fs.readFileSync(foreign, "utf8"), "keep");
   const other = exclusiveDir(path.join(root, "outside")); writeExclusive(path.join(other, "saved"), "keep");
-  fs.symlinkSync(other, path.join(staging, "junction-model"));
+  fs.symlinkSync(other, path.join(staging, "junction-model"), process.platform === "win32" ? "junction" : "dir");
   assert.throws(() => assertOwned(staging, owned));
   assert.equal(fs.readFileSync(path.join(other, "saved"), "utf8"), "keep");
 });
