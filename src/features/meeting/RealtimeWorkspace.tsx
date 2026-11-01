@@ -5,32 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Mic, Sparkles, Square } from "lucide-react";
 
 import { api } from "../../lib/api";
+import { createReviewTasks, removeReviewTask, type DraftTask, type ReviewTask, type RealtimeMember } from "./review-tasks";
 import { useRealtimeTranscription } from "./useRealtimeTranscription";
 
-interface DraftTask {
-  title: string;
-  ownerName: string;
-  estimatedHours: number;
-  dueDate: string | null;
-  dependsOnTitle?: string | null;
-  ownerBasis?: "explicit" | "pronoun" | "unknown";
-  ownerConfidence?: number;
-}
-
-export interface ReviewTask {
-  clientTaskId: string;
-  title: string;
-  ownerName: string;
-  ownerUserId: string | null;
-  estimatedHours: number;
-  dueDate: string | null;
-  dependsOnTitles: string[];
-}
-
-export interface RealtimeMember {
-  userId: string;
-  displayName: string;
-}
+export type { ReviewTask, RealtimeMember } from "./review-tasks";
 
 interface RealtimeWorkspaceProps {
   projectId: string;
@@ -133,10 +111,13 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
     [lines, partial],
   );
   const isLive = status === "live" || status === "connecting";
+  const busy = finishing || submitting;
+  const hasUnresolvedDependencies = review?.tasks.some((task) => task.unresolvedDependencies.length > 0) ?? false;
 
   const finish = async () => {
-    if (transcript.trim() === "") return;
+    if (transcript.trim() === "" || busy || review !== null) return;
     realtime.stop();
+    setSubmitError("");
     setFinishing(true);
     try {
       const corrected = await api
@@ -156,25 +137,13 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
         return;
       }
       if (draft.tasks.length === 0) {
-        const ok = await onFinish(corrected, [], draft.scheduleRevision);
-        if (!ok) setSubmitError("提交失败：排期没有生成，请重试。");
+        setSubmitError("没有识别到任务，原排期未更改。请补充任务内容后重新生成。");
         return;
       }
       setReview({
         text: corrected,
         scheduleRevision: draft.scheduleRevision,
-        tasks: draft.tasks.map((task, index) => ({
-          clientTaskId: `review-${Date.now()}-${index}`,
-          title: task.title,
-          ownerName: task.ownerName,
-          ownerUserId:
-            members.filter((member) => member.displayName === task.ownerName).length === 1
-              ? members.find((member) => member.displayName === task.ownerName)!.userId
-              : null,
-          estimatedHours: task.estimatedHours,
-          dueDate: task.dueDate,
-          dependsOnTitles: task.dependsOnTitle ? [task.dependsOnTitle] : [],
-        })),
+        tasks: createReviewTasks(draft.tasks, members),
       });
     } finally {
       setFinishing(false);
@@ -197,6 +166,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
         <div className="realtime-head-actions">
           {status !== "live" ? (
             <select
+              disabled={busy || review !== null}
               value={deviceId}
               onChange={(event) => setDeviceId(event.target.value)}
               className="realtime-device"
@@ -217,7 +187,12 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
             <button
               className="primary-button"
               type="button"
+              disabled={busy || review !== null}
               onClick={() => {
+                correctedCount.current = 0;
+                setSeconds(0);
+                setDrafts([]);
+                setSubmitError("");
                 realtime.reset();
                 void realtime.start(projectId, deviceId === "" ? undefined : deviceId);
               }}
@@ -225,7 +200,7 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
               <Mic size={15} /> 开始实时记录
             </button>
           )}
-          <button className="link-button" type="button" onClick={onExit}>
+          <button className="link-button" type="button" disabled={busy} onClick={onExit}>
             返回会议
           </button>
         </div>
@@ -253,27 +228,23 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
           </div>
           <div className="realtime-review-list">
             {review.tasks.map((task, index) => (
-              <div className="realtime-review-item" key={index}>
+              <div className="realtime-review-item" key={task.clientTaskId}>
                 <div className="realtime-review-row">
                 <input
                   className="realtime-review-title"
+                  aria-label={`任务 ${index + 1} 标题`}
+                  disabled={submitting}
+                  maxLength={60}
                   value={task.title}
                   onChange={(event) => {
                     const next = { ...review, tasks: [...review.tasks] };
-                    const previousTitle = task.title;
-                    const nextTitle = event.target.value;
-                    next.tasks[index] = { ...task, title: nextTitle };
-                    // 改标题时同步依赖引用，避免依赖指向旧标题。
-                    next.tasks = next.tasks.map((item) => ({
-                      ...item,
-                      dependsOnTitles: item.dependsOnTitles.map((title) =>
-                        title === previousTitle ? nextTitle : title,
-                      ),
-                    }));
+                    next.tasks[index] = { ...task, title: event.target.value };
                     setReview(next);
                   }}
                 />
                 <select
+                  aria-label={`任务 ${index + 1} 负责人`}
+                  disabled={submitting}
                   value={task.ownerUserId ?? "未分配"}
                   onChange={(event) => {
                     const next = { ...review, tasks: [...review.tasks] };
@@ -295,6 +266,8 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                 </select>
                 <input
                   type="number"
+                  aria-label={`任务 ${index + 1} 工时`}
+                  disabled={submitting}
                   min={0.5}
                   step={0.5}
                   value={task.estimatedHours}
@@ -307,35 +280,30 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                 <button
                   className="link-button"
                   type="button"
+                  disabled={submitting}
                   onClick={() => {
-                    const removed = task.title;
-                    const next = { ...review, tasks: review.tasks.filter((_, position) => position !== index) };
-                    // 删除前驱时清掉依赖，避免留下悬空引用。
-                    next.tasks = next.tasks.map((item) => ({
-                      ...item,
-                      dependsOnTitles: item.dependsOnTitles.filter((title) => title !== removed),
-                    }));
-                    setReview(next);
+                    setReview({ ...review, tasks: removeReviewTask(review.tasks, task.clientTaskId) });
                   }}
                 >
                   删除
                 </button>
                 </div>
                 <div className="realtime-review-dependency">
-                  {task.dependsOnTitles.length === 0 ? (
+                  {task.predecessorClientTaskIds.length === 0 && task.unresolvedDependencies.length === 0 ? (
                     <span>无依赖</span>
                   ) : (
-                    task.dependsOnTitles.map((title) => (
-                      <span key={title} className="realtime-review-dependency-chip">
-                        依赖：{title}
+                    task.predecessorClientTaskIds.map((id) => (
+                      <span key={id} className="realtime-review-dependency-chip">
+                        依赖：{review.tasks.find((item) => item.clientTaskId === id)?.title}
                         <button
                           className="link-button"
                           type="button"
+                          disabled={submitting}
                           onClick={() => {
                             const next = { ...review, tasks: [...review.tasks] };
                             next.tasks[index] = {
                               ...task,
-                              dependsOnTitles: task.dependsOnTitles.filter((item) => item !== title),
+                              predecessorClientTaskIds: task.predecessorClientTaskIds.filter((item) => item !== id),
                             };
                             setReview(next);
                           }}
@@ -345,46 +313,76 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                       </span>
                     ))
                   )}
+                  {task.unresolvedDependencies.map((title) => (
+                    <span key={title} className="realtime-review-dependency-chip">
+                      待确认依赖：{title}
+                      <select
+                        aria-label={`确认「${task.title}」的依赖「${title}」`}
+                        value=""
+                        disabled={submitting}
+                        onChange={(event) => {
+                          if (event.target.value === "") return;
+                          const next = { ...review, tasks: [...review.tasks] };
+                          next.tasks[index] = {
+                            ...task,
+                            predecessorClientTaskIds: [...new Set([...task.predecessorClientTaskIds, event.target.value])],
+                            unresolvedDependencies: task.unresolvedDependencies.filter((item) => item !== title),
+                          };
+                          setReview(next);
+                        }}
+                      >
+                        <option value="">选择具体前驱…</option>
+                        {review.tasks.map((candidate, position) => candidate.clientTaskId !== task.clientTaskId ? (
+                          <option key={candidate.clientTaskId} value={candidate.clientTaskId}>
+                            任务 {position + 1}：{candidate.title}
+                          </option>
+                        ) : null)}
+                      </select>
+                      <button className="link-button" type="button" disabled={submitting} onClick={() => {
+                        const next = { ...review, tasks: [...review.tasks] };
+                        next.tasks[index] = { ...task, unresolvedDependencies: task.unresolvedDependencies.filter((item) => item !== title) };
+                        setReview(next);
+                      }}>移除</button>
+                    </span>
+                  ))}
                   <select
                     className="realtime-review-dependency-select"
                     value=""
+                    disabled={submitting}
                     aria-label={`为「${task.title}」添加依赖`}
                     onChange={(event) => {
                       if (event.target.value === "") return;
                       const next = { ...review, tasks: [...review.tasks] };
                       next.tasks[index] = {
                         ...task,
-                        dependsOnTitles: [...task.dependsOnTitles, event.target.value],
+                        predecessorClientTaskIds: [...new Set([...task.predecessorClientTaskIds, event.target.value])],
                       };
                       setReview(next);
                     }}
                   >
                     <option value="">+ 添加依赖…</option>
-                    {review.tasks
-                      .filter(
-                        (candidate) =>
-                          candidate.title !== task.title &&
-                          !task.dependsOnTitles.includes(candidate.title),
-                      )
-                      .map((candidate) => (
-                        <option key={candidate.clientTaskId} value={candidate.title}>
-                          等待「{candidate.title}」完成
+                    {review.tasks.map((candidate, position) =>
+                      candidate.clientTaskId !== task.clientTaskId &&
+                      !task.predecessorClientTaskIds.includes(candidate.clientTaskId) ? (
+                        <option key={candidate.clientTaskId} value={candidate.clientTaskId}>
+                          等待「{candidate.title}」（任务 {position + 1}）完成
                         </option>
-                      ))}
+                      ) : null)}
                   </select>
                 </div>
               </div>
             ))}
           </div>
+          {hasUnresolvedDependencies ? <p className="form-error" role="alert">有依赖尚未确认，请选择具体前驱或移除该依赖后再生成排期。</p> : null}
           {submitError !== "" ? <p className="form-error">{submitError}</p> : null}
           <div className="realtime-review-foot">
-            <button className="secondary-button" type="button" onClick={() => setReview(null)}>
+            <button className="secondary-button" type="button" disabled={submitting} onClick={() => setReview(null)}>
               返回查看字幕
             </button>
             <button
               className="primary-button"
               type="button"
-              disabled={review.tasks.length === 0 || submitting}
+              disabled={review.tasks.length === 0 || submitting || hasUnresolvedDependencies}
               onClick={() => {
                 setSubmitError("");
                 void (async () => {
@@ -394,6 +392,8 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
                     if (!ok) {
                       setSubmitError("提交失败，任务清单与编辑内容已保留，可直接重试。");
                     }
+                  } catch {
+                    setSubmitError("提交失败，任务清单与编辑内容已保留，可直接重试。");
                   } finally {
                     setSubmitting(false);
                   }
@@ -446,20 +446,21 @@ export function RealtimeWorkspace({ projectId, members, onExit, onFinish }: Real
       </div>
       )}
 
-      <footer className="realtime-foot">
+      {review === null ? <footer className="realtime-foot">
+        {submitError !== "" ? <p className="form-error" role="alert">{submitError}</p> : null}
         <span className="realtime-hint">
           说完点「结束并生成排期」：会自动纠错人名、抽任务、建排期。
         </span>
         <button
           className="primary-button"
           type="button"
-          disabled={transcript.trim() === "" || finishing}
+          disabled={transcript.trim() === "" || busy}
           onClick={() => void finish()}
         >
           {finishing ? <LoaderCircle className="spin" size={15} /> : null}
           结束并生成排期
         </button>
-      </footer>
+      </footer> : null}
     </section>
   );
 }

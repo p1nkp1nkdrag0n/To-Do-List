@@ -1441,6 +1441,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.realtime-workspace button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.realtime-head-actions .realtime-device {
+  width: auto;
+  max-width: 100%;
 }
 
 .realtime-device {
@@ -1563,6 +1575,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .realtime-hint {
@@ -1599,6 +1612,11 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.realtime-review-head strong {
+  flex-shrink: 0;
 }
 
 .realtime-review-head span {
@@ -1653,6 +1671,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .realtime-review-item {
@@ -1687,4 +1706,32 @@
   background: var(--surface-soft);
   color: var(--muted);
   font-size: 11.5px;
+  max-width: 100%;
+}
+
+.realtime-review-dependency-chip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.realtime-review-dependency-chip select {
+  max-width: 100%;
+}
+
+@media (max-width: 600px) {
+  .realtime-review-row {
+    flex-wrap: wrap;
+  }
+
+  .realtime-review-title {
+    flex: 1 1 100%;
+  }
+
+  .realtime-review-row input[type="number"] {
+    flex: 0 0 84px;
+  }
 }
