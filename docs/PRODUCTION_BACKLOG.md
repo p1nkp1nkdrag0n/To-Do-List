@@ -1,5 +1,12 @@
 # 生产级问题交接清单
 
+> **2026-11-01 状态更正**：下文是早期问题的历史设计与复现记录，不应把其中的旧实现当成当前代码。
+> 当前已采用批量原子替换、整份计划短事务、撤销写后版本保护、完整输入指纹、初始化码与并发保护、持久数据目录和离线迁移。
+> 相关回归分别位于 `tests/server/http/meeting-atomic.integration.test.ts`、`tests/server/meeting/safety-write-unit.test.ts`、
+> `tests/server/meeting/undo-guard.test.ts`、`tests/server/mcp/fingerprint.test.ts`、`tests/server/http/bootstrap-safety.test.ts`
+> 与 `tests/packaging/`。运行 `npm test` 和 `npm run test:packaging` 复验当前工作树；发布时仍需独立完成 Windows EXE、升级和真实音频验收。
+> 本轮确认清单也改用稳定任务 ID，并增加真实浏览器的重名/改名/删除回归。旧版“本机免码”“数据仍在程序目录”等描述仅保留作历史背景。
+
 > 本文是 2026-10-31 复审后的交接文档。演示级问题（P05/P06/P08/P09/P10）已在
 > `fix/review-2` 分支修复；以下问题不影响 3 分钟演示，但影响“失败路径 / 并发编辑 /
 > 越权 / 初始化并发”的生产可用性，建议赛后按顺序处理。

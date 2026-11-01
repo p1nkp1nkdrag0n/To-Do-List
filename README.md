@@ -52,7 +52,7 @@ v2 是一次性重建版本，不读取或迁移 v1 业务数据。上线前请�
 - 验证记录：[验证清单](docs/验证清单.md)
 - 发布说明：[release-notes.md](release-notes.md)
 - 关键截图：[实时工作区](docs/images/realtime-workspace.png) · [确认清单](docs/images/task-confirmation.png) · [资料库](docs/images/resource-library.png)
-- 可执行文件：GitHub Releases 中的 `ToDoList-f960-交付版.exe`（125 MB，不进入 Git 历史）
+- 可执行文件：`ToDoList-f960-交付版.exe` 是此前内部验证包的名称，不作为公开下载承诺。正式分发时须提供真实 Release 链接、完整源码提交 SHA 和文件 SHA-256；不要按文件名判断源码版本。
 
 ## 会议 → 排期（本次新增）
 
