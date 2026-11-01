@@ -61,6 +61,15 @@ export const CollaborationServerMessageSchema = z.discriminatedUnion("type", [
     entityType: z.enum(["project", "task", "participant", "resource", "availability"]),
     entityId: IdSchema,
   }).strict(),
+  z.object({
+    type: z.literal("meeting.event"),
+    event: z.object({
+      type: z.string().min(1),
+      at: IsoDateTimeSchema,
+      message: z.string(),
+      detail: z.record(z.string(), z.unknown()).optional(),
+    }).strict(),
+  }).strict(),
 ]);
 
 export type CollaborationClientMessage = z.infer<typeof CollaborationClientMessageSchema>;

@@ -23,6 +23,13 @@ export interface CollaborationState {
   locks: Record<string, CollaborationLock>;
   previews: Record<string, CollaborationPreview>;
   invalidationVersion: number;
+  /** 会议编排推来的进度事件，按到达顺序累积。 */
+  meetingEvents: Array<{
+    type: string;
+    at: string;
+    message: string;
+    detail?: Record<string, unknown>;
+  }>;
 }
 
 export const initialCollaborationState: CollaborationState = {
@@ -30,6 +37,7 @@ export const initialCollaborationState: CollaborationState = {
   locks: {},
   previews: {},
   invalidationVersion: 0,
+  meetingEvents: [],
 };
 
 export function reduceCollaborationMessage(
@@ -72,6 +80,11 @@ export function reduceCollaborationMessage(
       return {
         ...state,
         invalidationVersion: state.invalidationVersion + 1,
+      };
+    case "meeting.event":
+      return {
+        ...state,
+        meetingEvents: [...state.meetingEvents, message.event].slice(-200),
       };
     default:
       return state;

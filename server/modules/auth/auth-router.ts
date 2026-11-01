@@ -1,10 +1,12 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 
 import {
+  BootstrapAdminRequestSchema,
   LoginRequestSchema,
   RegisterRequestSchema,
 } from "../../../shared/contracts.js";
 import { parseCookieHeader } from "../../http/cookies.js";
+import { HttpError } from "../../http/errors.js";
 import type { V2RuntimeDependencies } from "../../http/dependencies.js";
 import { asyncRoute, parseRequestBody } from "../../http/routing.js";
 import {
@@ -12,6 +14,13 @@ import {
   type AuthenticatedSession,
   sessionDurationSeconds,
 } from "./auth-service.js";
+
+/** Use the transport peer, never a client-controlled forwarded header. */
+function isLocalRequest(request: Request): boolean {
+  const ip = (request.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
+  const clientIp = (request.ip ?? ip).replace(/^::ffff:/, "");
+  return (ip === "127.0.0.1" || ip === "::1") && (clientIp === "127.0.0.1" || clientIp === "::1");
+}
 
 export interface AuthLocals {
   auth: AuthenticatedSession;
@@ -43,10 +52,37 @@ export function createAuthRouter(
     }
   };
 
+  /** 首启向导：只有空库时才需要/允许。 */
+  router.get("/bootstrap-status", (_request, response) => {
+    response.json({ needsBootstrap: service.needsBootstrap(), requiresBootstrapCode: dependencies.bootstrapCode !== "" });
+  });
+
+  router.post(
+    "/bootstrap",
+    asyncRoute(async (request, response) => {
+      if (!isLocalRequest(request)) {
+        throw new HttpError(
+          403,
+          "BOOTSTRAP_LOCAL_ONLY",
+          "首次初始化只能在本机完成：请在这台电脑上打开 127.0.0.1 地址后再创建管理员。",
+        );
+      }
+      const result = await service.bootstrapAdmin(
+        parseRequestBody(BootstrapAdminRequestSchema, request),
+        request.socket.remoteAddress ?? "unknown",
+      );
+      response.cookie("team_session", result.token, {
+        ...cookieOptions,
+        maxAge: sessionDurationSeconds * 1000,
+      });
+      response.status(201).json({ user: result.user, teamMember: result.teamMember });
+    }),
+  );
+
   router.post(
     "/register",
     asyncRoute(async (request, response) => {
-      const result = await service.register(parseRequestBody(RegisterRequestSchema, request));
+      const result = await service.register(parseRequestBody(RegisterRequestSchema, request), request.socket.remoteAddress ?? "unknown");
       response.status(201).json(result);
     }),
   );

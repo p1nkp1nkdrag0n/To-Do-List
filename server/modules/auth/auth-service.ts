@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import type { LoginRequest, RegisterRequest } from "../../../shared/contracts.js";
+import type {
+  BootstrapAdminRequest,
+  LoginRequest,
+  RegisterRequest,
+} from "../../../shared/contracts.js";
 import type { V2RuntimeDependencies } from "../../http/dependencies.js";
 import { HttpError } from "../../http/errors.js";
 import { writeActivity } from "../activity.js";
@@ -13,6 +17,13 @@ import { registrationInviteDigest } from "../registration-invites/registration-i
 const SESSION_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const AUTH_ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+/**
+ * 同一个 IP 的阈值放宽：学校 / 公司常用 NAT，几十个人共用一个出口 IP，
+ * 按 5 次就把整个班锁了。账号维度仍然严格。
+ */
+const MAX_FAILED_ATTEMPTS_PER_IP = 40;
+/** 同一个 IP 在窗口内试过多少个不同账号；用于防「换着用户名撞库」。 */
+const MAX_FAILED_USERNAMES_PER_IP = 5;
 const DUMMY_PASSWORD_HASH =
   "$2a$10$sVbWZn7SSXtOrTuqSFd5nO7ME8YKLv.NihvcSfbPyZbF0JZlsivX.";
 
@@ -87,10 +98,126 @@ function publicUser(row: UserRow): PublicUser {
 export class AuthService {
   constructor(private readonly dependencies: V2RuntimeDependencies) {}
 
-  async register(input: RegisterRequest): Promise<{
+  /** 空库（一个用户都没有）时才允许首启向导。 */
+  needsBootstrap(): boolean {
+    const count =
+      this.dependencies.database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM users",
+      )?.count ?? 0;
+    return count === 0;
+  }
+
+  /**
+   * 首启向导：创建第一个管理员并直接登录。
+   * 只有 users 为空时可用；一旦有账号，永久返回 409。
+   */
+  async bootstrapAdmin(
+    input: BootstrapAdminRequest,
+    ipAddress: string,
+  ): Promise<{ token: string; user: PublicUser; teamMember: boolean }> {
+    // 先确认实例还没初始化，再做耗时的密码哈希：
+    // 已经初始化后，这里必须立即失败，不能让请求拖着 CPU 和并发窗口。
+    if (!this.needsBootstrap()) {
+      throw new HttpError(409, "BOOTSTRAP_CLOSED", "这个系统已经初始化过了，请用邀请码注册。");
+    }
+    this.recordBootstrapAttempt(ipAddress);
+    // Share the expiring database-backed reservation with /register, so competing
+    // requests cannot start another expensive hash while the reservation is live.
+    const reservation = this.reserveRegistrationHash({
+      ...input,
+      bootstrapCode: input.bootstrapCode ?? (this.dependencies.bootstrapCode === "" ? "" : undefined),
+    });
+    try {
+      const passwordHash = await this.dependencies.passwordHasher(input.password);
+      return this.dependencies.database.transaction(() => {
+        const held = this.dependencies.database.get<{ id: string }>(
+          "SELECT id FROM registration_hash_reservations WHERE id = ? AND authorization_key = 'bootstrap'",
+          [reservation.id],
+        );
+        if (held === undefined) {
+          throw new HttpError(409, "BOOTSTRAP_RESERVATION_EXPIRED", "初始化已超时，请重试。");
+        }
+        const count =
+          this.dependencies.database.get<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM users",
+          )?.count ?? 0;
+        if (count > 0) {
+          throw new HttpError(
+            409,
+            "BOOTSTRAP_CLOSED",
+            "这个系统已经初始化过了，请用邀请码注册。",
+          );
+        }
+
+        const now = this.dependencies.clock();
+        const userId = this.dependencies.idGenerator();
+        this.dependencies.database.run(
+          `INSERT INTO users
+            (id, username, password_hash, display_name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            input.username,
+            passwordHash,
+            input.displayName,
+            now.toISOString(),
+            now.toISOString(),
+          ],
+        );
+        this.dependencies.database.run(
+          `INSERT INTO team_members (user_id, joined_at, invited_by)
+           VALUES (?, ?, NULL)`,
+          [userId, now.toISOString()],
+        );
+
+        const token = this.dependencies.sessionTokenGenerator();
+        const expiresAt = new Date(now.getTime() + SESSION_DURATION_MS);
+        this.dependencies.database.run(
+          `INSERT INTO sessions
+            (id, user_id, token_hash, expires_at, created_at, last_seen_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            this.dependencies.idGenerator(),
+            userId,
+            sha256(token),
+            expiresAt.toISOString(),
+            now.toISOString(),
+            now.toISOString(),
+          ],
+        );
+        writeActivity(this.dependencies, {
+          actorId: userId,
+          entityType: "user",
+          entityId: userId,
+          action: "auth.bootstrap_admin",
+        });
+
+        this.dependencies.database.run(
+          "DELETE FROM registration_hash_reservations WHERE id = ?", [reservation.id],
+        );
+        return {
+          token,
+          user: {
+            id: userId,
+            username: input.username,
+            displayName: input.displayName,
+            createdAt: now.toISOString(),
+            updatedAt: now.toISOString(),
+            revision: 1,
+          },
+          teamMember: true,
+        };
+      });
+    } finally {
+      this.releaseRegistrationHash(reservation.id);
+    }
+  }
+
+  async register(input: RegisterRequest, ipAddress = "unknown"): Promise<{
     user: PublicUser;
     teamMember: boolean;
   }> {
+    if (this.needsBootstrap()) this.recordBootstrapAttempt(ipAddress);
     const reservation = this.reserveRegistrationHash(input);
     try {
       const passwordHash = await this.dependencies.passwordHasher(input.password);
@@ -343,6 +470,32 @@ export class AuthService {
     });
   }
 
+  /** Persist attempts before authorization, so invalid codes cannot roll the limiter back. */
+  private recordBootstrapAttempt(ipAddress: string): void {
+    const admitted = this.dependencies.database.transaction(() => {
+      const now = this.dependencies.clock();
+      this.purgeStaleAuthAttempts(now);
+      const cutoff = new Date(now.getTime() - AUTH_ATTEMPT_WINDOW_MS).toISOString();
+      const count = this.dependencies.database.get<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM auth_attempts
+         WHERE normalized_username = '!bootstrap' AND ip_address = ? AND attempted_at > ?`,
+        [ipAddress, cutoff],
+      )?.count ?? 0;
+      const total = this.dependencies.database.get<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM auth_attempts
+         WHERE normalized_username = '!bootstrap' AND attempted_at > ?`, [cutoff],
+      )?.count ?? 0;
+      if (count >= 5 || total >= 40) return false;
+      this.dependencies.database.run(
+        `INSERT INTO auth_attempts (id, normalized_username, ip_address, state, attempted_at)
+         VALUES (?, '!bootstrap', ?, 'failed', ?)`,
+        [this.dependencies.idGenerator(), ipAddress, now.toISOString()],
+      );
+      return true;
+    });
+    if (!admitted) throw new HttpError(429, "BOOTSTRAP_RATE_LIMITED", "初始化尝试过多，请稍后重试。");
+  }
+
   private authRequired(): HttpError {
     return new HttpError(401, "AUTH_REQUIRED", "Authentication is required.");
   }
@@ -523,9 +676,16 @@ export class AuthService {
             WHERE ip_address = ? AND attempted_at > ?`,
           [ipAddress, cutoff],
         )?.count ?? 0;
+      const distinctUsernames =
+        this.dependencies.database.get<{ count: number }>(
+          `SELECT COUNT(DISTINCT normalized_username) AS count FROM auth_attempts
+            WHERE ip_address = ? AND attempted_at > ?`,
+          [ipAddress, cutoff],
+        )?.count ?? 0;
       if (
         usernameCount >= MAX_FAILED_LOGIN_ATTEMPTS ||
-        ipCount >= MAX_FAILED_LOGIN_ATTEMPTS
+        ipCount >= MAX_FAILED_ATTEMPTS_PER_IP ||
+        distinctUsernames >= MAX_FAILED_USERNAMES_PER_IP
       ) {
         return undefined;
       }

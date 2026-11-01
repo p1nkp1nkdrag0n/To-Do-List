@@ -288,6 +288,31 @@ export const ExpectedRevisionRequestSchema = z
   .object({ expectedRevision: RevisionSchema })
   .strict();
 
+/** 会议 → 排期的批量候选任务：用 clientTaskId 建依赖，不拿标题猜。 */
+export const MeetingTaskCandidateSchema = z
+  .object({
+    clientTaskId: z.string().trim().min(1).max(120),
+    title: TitleSchema,
+    ownerUserId: IdSchema.nullable(),
+    estimatedMinutes: z.number().int().min(0).max(20_000),
+    startDate: IsoDateSchema,
+    dueDate: IsoDateSchema,
+    predecessorClientTaskIds: z.array(z.string().trim().min(1).max(120)).default([]),
+  })
+  .strict()
+  .refine(({ startDate, dueDate }) => startDate <= dueDate, {
+    message: "startDate must not be after dueDate",
+  });
+
+export const CommitMeetingTasksRequestSchema = z
+  .object({
+    projectId: z.string().trim().min(1),
+    expectedScheduleRevision: RevisionSchema,
+    replaceSchedule: z.boolean(),
+    tasks: z.array(MeetingTaskCandidateSchema).min(1).max(200),
+  })
+  .strict();
+
 export type CreatePhaseRequest = z.infer<typeof CreatePhaseRequestSchema>;
 export type PatchPhaseRequest = z.infer<typeof PatchPhaseRequestSchema>;
 export type CreateTaskRequest = z.infer<typeof CreateTaskRequestSchema>;
@@ -308,3 +333,5 @@ export type SaveTeamTemplateRequest = z.infer<typeof SaveTeamTemplateRequestSche
 export type UpdateTeamTemplateRequest = z.infer<typeof UpdateTeamTemplateRequestSchema>;
 export type ApplyTemplateRequest = z.infer<typeof ApplyTemplateRequestSchema>;
 export type ExpectedRevisionRequest = z.infer<typeof ExpectedRevisionRequestSchema>;
+export type MeetingTaskCandidate = z.infer<typeof MeetingTaskCandidateSchema>;
+export type CommitMeetingTasksRequest = z.infer<typeof CommitMeetingTasksRequestSchema>;

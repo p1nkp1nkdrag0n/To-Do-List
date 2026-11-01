@@ -36,6 +36,10 @@ export interface V2AppDependencies {
     entityType: "project" | "task" | "participant" | "resource" | "availability",
     entityId: string,
   ) => void;
+  publishMeetingEvent?: (
+    projectId: string,
+    event: { type: string; at: string; message: string; detail?: Record<string, unknown> },
+  ) => void;
 }
 
 export interface V2RuntimeDependencies {
@@ -59,6 +63,10 @@ export interface V2RuntimeDependencies {
     projectId: string,
     entityType: "project" | "task" | "participant" | "resource" | "availability",
     entityId: string,
+  ) => void;
+  publishMeetingEvent?: (
+    projectId: string,
+    event: { type: string; at: string; message: string; detail?: Record<string, unknown> },
   ) => void;
 }
 

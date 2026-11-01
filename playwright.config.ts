@@ -8,6 +8,8 @@ export default defineConfig({
   expect: { timeout: 12_000 },
   reporter: [["list"]],
   use: {
+    // 受限环境装不了自带 Chromium 时，用系统 Edge：PLAYWRIGHT_CHANNEL=msedge。
+    channel: process.env.PLAYWRIGHT_CHANNEL,
     baseURL: "http://127.0.0.1:5173",
     viewport: { width: 1440, height: 900 },
     actionTimeout: 12_000,

@@ -23,6 +23,7 @@ export interface CollaborationClient {
   locks: Record<string, CollaborationLock>;
   previews: Record<string, CollaborationPreview>;
   invalidationVersion: number;
+  meetingEvents: typeof initialCollaborationState.meetingEvents;
   acquireLock: (participantId: string) => Promise<boolean>;
   heartbeat: (participantId: string) => void;
   preview: (participantId: string, startDate: string, endDate: string) => void;
@@ -202,6 +203,7 @@ export function useCollaboration(
     locks: state.locks,
     previews: state.previews,
     invalidationVersion: state.invalidationVersion,
+    meetingEvents: state.meetingEvents,
     acquireLock,
     heartbeat,
     preview,

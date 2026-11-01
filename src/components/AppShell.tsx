@@ -6,6 +6,7 @@ import {
   FileArchive,
   GanttChartSquare,
   LogOut,
+  Mic,
   Monitor,
   Moon,
   PanelLeftClose,
@@ -15,14 +16,14 @@ import {
   Sun,
   SunMoon,
   UserPlus,
-} from "lucide-react";
+  KeyRound, CircleHelp, PlayCircle } from "lucide-react";
 
 import type { PresenceUser } from "../../shared/realtime-contracts";
 import type { AppearanceController } from "../lib/useAppearance";
 import type { AuthState, Project, ProjectDetail } from "../types";
 import { BrandMark } from "./BrandMark";
 
-export type WorkspaceView = "gantt" | "resources" | "availability";
+export type WorkspaceView = "gantt" | "resources" | "availability" | "meeting";
 
 interface AppShellProps {
   auth: AuthState;
@@ -39,6 +40,9 @@ interface AppShellProps {
   onChangeView: (view: WorkspaceView) => void;
   onCreateProject: () => void;
   onInvite: () => void;
+  onRegistrationInvites: () => void;
+  onOpenHelp: () => void;
+  onOpenTutorial: () => void;
   onProjectSettings: () => void;
   onLogout: () => void;
 }
@@ -49,6 +53,7 @@ const navigation: Array<{
   icon: typeof GanttChartSquare;
 }> = [
   { id: "gantt", label: "甘特图", icon: GanttChartSquare },
+  { id: "meeting", label: "会议", icon: Mic },
   { id: "resources", label: "资料库", icon: FileArchive },
   { id: "availability", label: "可用时间", icon: CalendarClock },
 ];
@@ -72,6 +77,9 @@ export function AppShell({
   onChangeView,
   onCreateProject,
   onInvite,
+  onRegistrationInvites,
+  onOpenHelp,
+  onOpenTutorial,
   onProjectSettings,
   onLogout,
 }: AppShellProps) {
@@ -197,6 +205,36 @@ export function AppShell({
             >
               <UserPlus size={17} />
               <span className="utility-label">邀请项目成员</span>
+            </button>
+            <button
+              type="button"
+              aria-label="注册邀请码"
+              title={sidebarCollapsed ? "注册邀请码" : undefined}
+              data-tooltip="注册邀请码"
+              onClick={onRegistrationInvites}
+            >
+              <KeyRound size={17} />
+              <span className="utility-label">注册邀请码</span>
+            </button>
+            <button
+              type="button"
+              aria-label="演示教程"
+              title={sidebarCollapsed ? "演示教程" : undefined}
+              data-tooltip="演示教程"
+              onClick={onOpenTutorial}
+            >
+              <PlayCircle size={17} />
+              <span className="utility-label">演示教程</span>
+            </button>
+            <button
+              type="button"
+              aria-label="使用说明"
+              title={sidebarCollapsed ? "使用说明" : undefined}
+              data-tooltip="使用说明"
+              onClick={onOpenHelp}
+            >
+              <CircleHelp size={17} />
+              <span className="utility-label">使用说明</span>
             </button>
             <button
               type="button"
