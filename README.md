@@ -112,6 +112,8 @@ deploy/                 生产环境与反向代理示例
 
 本仓库由 [p1nkp1nkdrag0n](https://github.com/p1nkp1nkdrag0n) 维护。会议排期、语音与桌面启动器等功能包含 [qyhsktn](https://github.com/qyhsktn/meeting-scheduler) 的开发贡献；这些工作与后续修复通过 [PR #6](https://github.com/p1nkp1nkdrag0n/To-Do-List/pull/6) 整合，原始提交历史保留在仓库中。
 
+也感谢 GPT-5.5、GPT-6 Astra、DeepSeek V4.1 Flash 1017 和 Kimi K3.1 在项目开发中的参与和帮助。
+
 当前默认运行 v2；v1 代码仅为历史兼容与回归保留。v2 不读取或迁移 v1 业务数据库。桌面启动器的“旧数据迁移”指旧版 v2 的存储目录迁移，详见[部署指南](docs/deployment-guide.md)。
 
 ## 开源许可与对应源码
